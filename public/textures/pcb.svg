@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M 32 0 L 0 0 0 32" fill="none" stroke="#1a4a2a" stroke-width="0.5"/>
+    </pattern>
+    <radialGradient id="pad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#d4af37"/>
+      <stop offset="80%" stop-color="#a67c00"/>
+      <stop offset="100%" stop-color="#5c4600"/>
+    </radialGradient>
+  </defs>
+  
+  <!-- Фон платы -->
+  <rect width="512" height="512" fill="#0d3d1f"/>
+  <rect width="512" height="512" fill="url(#grid)" opacity="0.4"/>
+  
+  <!-- Дорожки -->
+  <g stroke="#d4af37" stroke-width="2" fill="none" opacity="0.7">
+    <path d="M 32 64 L 200 64 L 200 150 L 350 150 L 350 280 L 480 280"/>
+    <path d="M 64 128 L 64 300 L 180 300 L 180 420 L 320 420"/>
+    <path d="M 128 32 L 128 200 L 280 200 L 280 380 L 420 380"/>
+    <path d="M 256 64 L 256 220 L 400 220 L 400 440"/>
+    <path d="M 480 128 L 380 128 L 380 260 L 220 260 L 220 400"/>
+  </g>
+  
+  <!-- Медные пятачки -->
+  <g fill="url(#pad)">
+    <circle cx="32" cy="64" r="6"/>
+    <circle cx="200" cy="64" r="6"/>
+    <circle cx="350" cy="280" r="6"/>
+    <circle cx="480" cy="280" r="6"/>
+    <circle cx="64" cy="128" r="6"/>
+    <circle cx="180" cy="420" r="6"/>
+    <circle cx="128" cy="32" r="6"/>
+    <circle cx="420" cy="380" r="6"/>
+    <circle cx="256" cy="64" r="6"/>
+    <circle cx="400" cy="440" r="6"/>
+    <circle cx="480" cy="128" r="6"/>
+    <circle cx="220" cy="400" r="6"/>
+  </g>
+  
+  <!-- Виа (отверстия) -->
+  <g fill="#1a1a1a">
+    <circle cx="350" cy="150" r="3"/>
+    <circle cx="280" cy="200" r="3"/>
+    <circle cx="380" cy="260" r="3"/>
+    <circle cx="180" cy="300" r="3"/>
+  </g>
+</svg>
