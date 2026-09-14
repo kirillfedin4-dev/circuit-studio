@@ -78,7 +78,7 @@ export default function Sidebar({
             WebkitTextFillColor: 'transparent',
           }}
         >
-          ⚡ Circuit Studio
+          Wire Way
         </div>
         <div style={{ fontSize: 10, color: T.textDim, marginTop: 2 }}>
           3D редактор цепей

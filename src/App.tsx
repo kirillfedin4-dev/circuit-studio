@@ -78,8 +78,6 @@ function rotateOffset3D(offset: [number, number, number], rot: [number, number, 
 function getOtherPin(type: string, pin: string): string | null {
   switch (type) {
     case 'resistor':
-          case 'transistor':
-      return null; // у транзистора нет "другого пина" — все три независимы
     case 'lamp':
     case 'inductor':
     case 'switch':
@@ -89,12 +87,13 @@ function getOtherPin(type: string, pin: string): string | null {
       return pin === '+' ? '-' : '+';
     case 'ammeter':
       return pin === 'IN' ? 'OUT' : 'IN';
-    default:
-      return null;
-          case 'diode':
+    case 'diode':
       return pin === 'A' ? 'K' : 'A';
-          case 'potentiometer':
-      // У потенциометра 3 пина — BFS сам решает, куда идти
+    case 'transistor':
+      return null;
+    case 'potentiometer':
+      return null;
+    default:
       return null;
   }
 }
@@ -587,6 +586,7 @@ function DraggableComponent({
       {comp.type === 'lamp' && (
         <GLBModel path="/models/lamp.glb" fallback={<LampModel selected={selected} lit={lit} burnt={burnt} overheated={overheated} rating={comp.rating ?? 1} />} />
       )}
+      {comp.type === 'voltmeter' && <VoltmeterModel selected={selected} voltage={voltmeterVoltage} energized={energized} />}
       {comp.type === 'lamp' && burnt && (
         <>
           <SmokeParticles position={[0, 0.5, 0]} />
@@ -802,7 +802,7 @@ function analyzeCircuit(components: CircuitComponent[], wires: Wire[]): ChainAna
         let next: { comp: string; pin: string } | null = null;
         if (w.fromComp === cur.comp && w.fromPin === cur.pin) { next = { comp: w.toComp, pin: w.toPin }; pathWires.push(w.id); }
         else if (w.toComp === cur.comp && w.toPin === cur.pin) { next = { comp: w.fromComp, pin: w.fromPin }; pathWires.push(w.id); }
-        if (next) {
+       if (next) {
           const comp = components.find((c) => c.id === next!.comp);
           if (comp && comp.type !== 'battery') {
             if (comp.type === 'switch' && !comp.closed) continue;
