@@ -967,12 +967,17 @@ export default function App() {
   // ---------- Рамка выделения: Alt + ЛКМ ----------
   useEffect(() => {
     const onPointerDown = (e: PointerEvent) => {
-      if (e.button !== 0) return;
-      // Только Alt+ЛКМ запускает рамку
-      if (!e.altKey) return;
+      // Средняя кнопка мыши (клик колёсиком) ИЛИ Alt+ЛКМ
+      const isMiddle = e.button === 1;
+      const isAltLeft = e.button === 0 && e.altKey;
+      if (!isMiddle && !isAltLeft) return;
       const target = e.target as HTMLElement;
       if (target.closest('[data-ui-panel]')) return;
       if (target.tagName !== 'CANVAS') return;
+
+      if (isMiddle) {
+        e.preventDefault();
+      }
 
       e.preventDefault();
       e.stopPropagation();
