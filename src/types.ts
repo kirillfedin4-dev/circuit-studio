@@ -1,6 +1,7 @@
 export type ComponentType =
   | 'battery' | 'resistor' | 'lamp' | 'capacitor' | 'inductor'
-  | 'led' | 'switch' | 'ground' | 'ammeter' | 'voltmeter';
+  | 'led' | 'switch' | 'ground' | 'ammeter' | 'voltmeter'
+  | 'transistor' | 'diode' | 'potentiometer';
 
 export interface Pin { name: string; offset: [number, number, number]; }
 
@@ -19,6 +20,10 @@ export interface CircuitComponent {
   lampMuted?: boolean;
   /** Звук лампы: громкость 0..1 */
   lampVolume?: number;
+    hFE?: number;
+  /** Транзистор: открыт ли переход (для ручного управления) */
+  transistorOpen?: boolean;
+   wiper?: number;
 }
 
 export interface Wire {

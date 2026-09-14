@@ -19,7 +19,10 @@ import RobotMascot from './components/RobotMascot';
 import LampContextMenu from './components/LampContextMenu';
 import { LESSONS } from './lessons';
 import type { CircuitComponent, Wire, ComponentType } from './types';
-
+import RemoteCursor from './components/RemoteCursor';
+import TransistorModel from './components/TransistorModel';
+import DiodeModel from './components/DiodeModel';
+import PotentiometerModel from './components/PotentiometerModel';
 // ---------- SubCircuit ----------
 
 interface SubCircuit {
@@ -41,6 +44,20 @@ const PINS: Record<ComponentType, { name: string; offset: [number, number, numbe
   ground: [{ name: 'GND', offset: [0, 0.6, 0] }],
   ammeter: [{ name: 'IN', offset: [-0.9, 0.2, 0] }, { name: 'OUT', offset: [0.9, 0.2, 0] }],
   voltmeter: [{ name: '+', offset: [-0.9, 0.2, 0] }, { name: '-', offset: [0.9, 0.2, 0] }],
+    transistor: [
+    { name: 'B', offset: [-0.8, 0.3, 0] },
+    { name: 'C', offset: [0.7, 0.7, 0] },
+    { name: 'E', offset: [0.7, -0.1, 0] },
+  ],
+    diode: [
+    { name: 'A', offset: [-0.6, 0.3, 0] },
+    { name: 'K', offset: [0.6, 0.3, 0] },
+  ],
+    potentiometer: [
+    { name: 'A', offset: [-1, 0.3, 0] },
+    { name: 'W', offset: [0, 1.2, 0] },
+    { name: 'B', offset: [1, 0.3, 0] },
+  ],
 };
 
 function rotateOffset3D(offset: [number, number, number], rot: [number, number, number]): [number, number, number] {
@@ -61,6 +78,8 @@ function rotateOffset3D(offset: [number, number, number], rot: [number, number, 
 function getOtherPin(type: string, pin: string): string | null {
   switch (type) {
     case 'resistor':
+          case 'transistor':
+      return null; // у транзистора нет "другого пина" — все три независимы
     case 'lamp':
     case 'inductor':
     case 'switch':
@@ -71,6 +90,11 @@ function getOtherPin(type: string, pin: string): string | null {
     case 'ammeter':
       return pin === 'IN' ? 'OUT' : 'IN';
     default:
+      return null;
+          case 'diode':
+      return pin === 'A' ? 'K' : 'A';
+          case 'potentiometer':
+      // У потенциометра 3 пина — BFS сам решает, куда идти
       return null;
   }
 }
@@ -431,7 +455,7 @@ function PinMarker({ pin, compId, onPinDown, onPinUp, active, highlighted }: {
 function DraggableComponent({
   comp, selected, lit, burnt, overheated,
   onClick, onDrag, onDragStart, onDragEnd, disableControls, enableControls,
-  connectSource, onPinDown, onPinUp, onToggleSwitch,
+  connectSource, onPinDown, onPinUp, onToggleSwitch, onChangeWiper,
   ammeterCurrent, voltmeterVoltage, energized,
   remoteUsers, onLampContextMenu, draggedIds,
 }: {
@@ -445,6 +469,7 @@ function DraggableComponent({
   onPinDown: (ref: { comp: string; pin: string }, e: ThreeEvent<PointerEvent>) => void;
   onPinUp: (ref: { comp: string; pin: string }) => void;
   onToggleSwitch: () => void;
+  onChangeWiper: (v: number) => void;
   ammeterCurrent: number; voltmeterVoltage: number; energized: boolean;
   remoteUsers: { id: string; color: string; selectedId?: string }[];
   onLampContextMenu?: (compId: string, e: ThreeEvent<MouseEvent>) => void;
@@ -577,7 +602,28 @@ function DraggableComponent({
       {comp.type === 'switch' && <SwitchModel selected={selected} closed={comp.closed ?? false} onToggle={onToggleSwitch} />}
       {comp.type === 'ground' && <GroundModel selected={selected} />}
       {comp.type === 'ammeter' && <AmmeterModel selected={selected} current={ammeterCurrent} energized={energized} />}
-      {comp.type === 'voltmeter' && <VoltmeterModel selected={selected} voltage={voltmeterVoltage} energized={energized} />}
+            {comp.type === 'transistor' && (
+        <TransistorModel
+          selected={selected}
+          hFE={comp.hFE ?? 100}
+          open={comp.transistorOpen ?? false}
+          onToggle={onToggleSwitch}
+        />
+      )}
+          {comp.type === 'diode' && (
+        <DiodeModel
+          selected={selected}
+          conducting={lit}
+        />
+      )}
+    {comp.type === 'potentiometer' && (
+        <PotentiometerModel
+          selected={selected}
+          resistance={comp.resistance ?? 1000}
+          wiper={comp.wiper ?? 0.5}
+          onChangeWiper={onChangeWiper}
+        />
+      )}
 
       {PINS[comp.type].map((pin) => {
         const rotated = rotateOffset3D(pin.offset, rot);
@@ -762,6 +808,16 @@ function analyzeCircuit(components: CircuitComponent[], wires: Wire[]): ChainAna
             if (comp.type === 'switch' && !comp.closed) continue;
             if (comp.type === 'voltmeter') continue;
             if (comp.type === 'lamp' && burntLamps.has(comp.id)) continue;
+
+            // ⚡ Диод: ток только от A к K
+            if (comp.type === 'diode') {
+              const enteringFrom = next!.pin;       // пин, с которого вошли
+              const otherPin = enteringFrom === 'A' ? 'K' : 'A';
+              if (enteringFrom !== 'A') continue;   // вошли не с анода — ток не идёт
+              queue.push({ comp: comp.id, pin: otherPin });
+              continue;
+            }
+
             const otherPin = getOtherPin(comp.type, next!.pin);
             if (otherPin) queue.push({ comp: comp.id, pin: otherPin });
           } else queue.push(next);
@@ -781,6 +837,7 @@ function analyzeCircuit(components: CircuitComponent[], wires: Wire[]): ChainAna
         if (c.type === 'lamp') R += (c.rating ?? 1) * 100;
         if (c.type === 'led') R += 150;
         if (c.type === 'ammeter') R += 0.01;
+        if (c.type === 'diode') R += 50;    // небольшое сопротивление открытого диода
       });
       if (R <= 0) R = 0.1;
       totalResistance = R;
@@ -798,6 +855,7 @@ function analyzeCircuit(components: CircuitComponent[], wires: Wire[]): ChainAna
           else litLamps.add(c.id);
         }
         if (c.type === 'led') litLamps.add(c.id);
+        if (c.type === 'diode') litLamps.add(c.id);
       });
     } else errors.push(`⚠ Цепь не замкнута`);
   }
@@ -818,6 +876,9 @@ const COMPONENT_LABELS: Record<ComponentType, { icon: string; name: string; colo
   ground: { icon: '⏚', name: 'Земля', color: '#64748b' },
   ammeter: { icon: '📏', name: 'Амперметр', color: '#10b981' },
   voltmeter: { icon: '📐', name: 'Вольтметр', color: '#0ea5e9' },
+  transistor: { icon: '🔺', name: 'Транзистор NPN', color: '#8b5cf6' },
+  diode: { icon: '🔷', name: 'Диод', color: '#6366f1' },
+  potentiometer: { icon: '🎚️', name: 'Потенциометр', color: '#f97316' },
 };
 
 const PRESET_BLOCKS: SubCircuit[] = [
@@ -886,7 +947,13 @@ export default function App() {
     if (typeof window === 'undefined') return 'default';
     return new URLSearchParams(window.location.search).get('room') || '';
   });
-  const [onlineUsers, setOnlineUsers] = useState<{ id: string; color: string; selectedId?: string }[]>([]);
+  const [onlineUsers, setOnlineUsers] = useState<{
+  id: string;
+  color: string;
+  selectedId?: string;
+  cursor?: [number, number, number];
+  name?: string;
+}[]>([]);
   const [mpStatus, setMpStatus] = useState<'off' | 'connecting' | 'connected'>('off');
 
   const controlsRef = useRef<any>(null);
@@ -1157,17 +1224,19 @@ export default function App() {
 
     const awareness = provider.awareness;
     yAwarenessRef.current = awareness;
-    const updateUsers = () => {
-      const states = Array.from(awareness.getStates().entries()) as [number, any][];
-      const others = states
-        .filter(([id]) => id !== ydoc.clientID)
-        .map(([id, s]) => ({
-          id: String(id),
-          color: s.user?.color || '#a855f7',
-          selectedId: s.user?.selectedId,
-        }));
-      setOnlineUsers(others);
-    };
+const updateUsers = () => {
+  const states = Array.from(awareness.getStates().entries()) as [number, any][];
+  const others = states
+    .filter(([id]) => id !== ydoc.clientID)
+    .map(([id, s]) => ({
+      id: String(id),
+      color: s.user?.color || '#a855f7',
+      selectedId: s.user?.selectedId,
+      cursor: s.user?.cursor,
+      name: s.user?.clientId || String(id).slice(-4),
+    }));
+  setOnlineUsers(others);
+};
     awareness.on('change', updateUsers);
     updateUsers();
 
@@ -1211,6 +1280,42 @@ export default function App() {
       selectedId: first ?? null,
     });
   }, [selectedIds]);
+  // Отправка позиции своего курсора в awareness (throttle ~30 fps)
+useEffect(() => {
+  if (!roomId) return;
+  const { camera, raycaster, pointer } = (window as any).__r3f ?? {};
+  if (!camera) return;
+
+  const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  const hit = new THREE.Vector3();
+  let rafId = 0;
+  let lastSent = 0;
+
+  const tick = () => {
+    rafId = requestAnimationFrame(tick);
+    const now = performance.now();
+    if (now - lastSent < 33) return; // ~30 fps
+    lastSent = now;
+
+    const cam = (window as any).__r3fCamera;
+    const ptr = (window as any).__r3fPointer;
+    const rcast = (window as any).__r3fRaycaster;
+    if (!cam || !ptr || !rcast || !yAwarenessRef.current) return;
+
+    rcast.setFromCamera(ptr, cam);
+    if (rcast.ray.intersectPlane(plane, hit)) {
+      const x = Math.max(-15, Math.min(15, hit.x));
+      const z = Math.max(-15, Math.min(15, hit.z));
+      yAwarenessRef.current.setLocalStateField('user', {
+        ...(yAwarenessRef.current.getLocalState()?.user || {}),
+        cursor: [x, 0, z],
+      });
+    }
+  };
+
+  rafId = requestAnimationFrame(tick);
+  return () => cancelAnimationFrame(rafId);
+}, [roomId]);
 
   useEffect(() => {
     const snapshot = { components: JSON.parse(JSON.stringify(components)), wires: JSON.parse(JSON.stringify(wires)) };
@@ -1423,7 +1528,9 @@ export default function App() {
     if (type === 'lamp') { base.rating = 1; base.lampVolume = 0.5; base.lampMuted = false; }
     if (type === 'capacitor') base.capacitance = 100;
     if (type === 'inductor') base.inductance = 10;
-    if (type === 'switch') base.closed = false;
+    if (type === 'transistor') { base.hFE = 100; base.transistorOpen = false; }
+    if (type === 'transistor') { base.hFE = 100; base.transistorOpen = false; }
+    if (type === 'potentiometer') { base.resistance = 1000; base.wiper = 0.5; }
     setComponents((prev) => [...prev, base]);
     setSelectedIds(new Set([id])); setSelectedWireId(null);
   };
@@ -1550,9 +1657,36 @@ export default function App() {
 
   const toggleSwitch = (id: string) => {
     if (soundOn) playClick();
-    setComponents((prev) => prev.map((c) => (c.id === id ? { ...c, closed: !c.closed } : c)));
+    setComponents((prev) =>
+      prev.map((c) => {
+        if (c.id !== id) return c;
+        if (c.type === 'transistor') return { ...c, transistorOpen: !c.transistorOpen };
+        return { ...c, closed: !c.closed };
+      })
+    );
   };
+const saveScreenshot = () => {
+  // Ищем canvas именно от react-three-fiber:
+  // у него атрибут data-engine="three.js rXXX" — уникально для Three.js
+  const canvas = document.querySelector('canvas[data-engine]') as HTMLCanvasElement | null
+    // fallback: пробуем window.__r3fCanvas, если он валиден
+    ?? ((window as any).__r3fCanvas as HTMLCanvasElement | null);
 
+  if (!canvas) {
+    alert('Не удалось найти 3D-canvas');
+    return;
+  }
+
+  try {
+    const dataUrl = canvas.toDataURL('image/png');
+    const a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = `circuit-${Date.now()}.png`;
+    a.click();
+  } catch (e) {
+    alert('Ошибка экспорта: ' + e);
+  }
+};
   const saveCircuit = () => {
     const data = JSON.stringify({ components, wires }, null, 2);
     const blob = new Blob([data], { type: 'application/json' });
@@ -1752,6 +1886,7 @@ export default function App() {
             if (type === 'capacitor') base.capacitance = 100;
             if (type === 'inductor') base.inductance = 10;
             if (type === 'switch') base.closed = false;
+            if (type === 'potentiometer') { base.resistance = 1000; base.wiper = 0.5; }
             setComponents((prev) => [...prev, base]);
             setSelectedIds(new Set([id]));
             setSelectedWireId(null);
@@ -1966,6 +2101,9 @@ export default function App() {
                     <button style={{ ...actionBtn(T), background: T.buttonBg, color: T.textMuted }} onClick={exportSpice}>
                       📋 Экспорт SPICE
                     </button>
+                    <button style={{ ...actionBtn(T), background: T.buttonBg, color: T.textMuted }} onClick={saveScreenshot}>
+  📸 Скриншот (PNG)
+</button>
                   </>
                 ),
               },
@@ -2010,7 +2148,65 @@ export default function App() {
           {selectedComp.type === 'resistor' && <SliderField label="Сопротивление (Ω)" value={selectedComp.resistance ?? 220} min={10} max={10000} step={10} color={T.accent1} theme={T} onChange={(v) => updateValue(selectedComp.id, 'resistance', v)} />}
           {selectedComp.type === 'lamp' && <SliderField label="Мощность (Вт)" value={selectedComp.rating ?? 1} min={0.1} max={10} step={0.1} color={T.success} theme={T} onChange={(v) => updateValue(selectedComp.id, 'rating', v)} />}
           {selectedComp.type === 'capacitor' && <SliderField label="Ёмкость (µF)" value={selectedComp.capacitance ?? 100} min={1} max={1000} step={1} color={T.accent1} theme={T} onChange={(v) => updateValue(selectedComp.id, 'capacitance', v)} />}
-          {selectedComp.type === 'inductor' && <SliderField label="Индуктивность (mH)" value={selectedComp.inductance ?? 10} min={1} max={100} step={1} color={T.accent2} theme={T} onChange={(v) => updateValue(selectedComp.id, 'inductance', v)} />}
+          {selectedComp.type === 'transistor' && (
+            <>
+              <SliderField
+                label="Коэффициент усиления hFE"
+                value={selectedComp.hFE ?? 100}
+                min={10}
+                max={500}
+                step={10}
+                color="#8b5cf6"
+                theme={T}
+                onChange={(v) => {
+                  setComponents((prev) =>
+                    prev.map((c) => (c.id === selectedComp.id ? { ...c, hFE: v } : c))
+                  );
+                }}
+              />
+              <div style={{ fontSize: 12, color: T.textMuted, marginBottom: 8, display: 'flex', justifyContent: 'space-between' }}>
+                <span>Состояние</span>
+                <b style={{ color: selectedComp.transistorOpen ? T.success : T.danger }}>
+                  {selectedComp.transistorOpen ? 'Открыт ✅' : 'Закрыт ⛔'}
+                </b>
+              </div>
+            </>
+          )}
+
+          {selectedComp.type === 'potentiometer' && (
+            <>
+              <SliderField
+                label="Полное сопротивление (Ω)"
+                value={selectedComp.resistance ?? 1000}
+                min={100}
+                max={10000}
+                step={100}
+                color="#f97316"
+                theme={T}
+                onChange={(v) => updateValue(selectedComp.id, 'resistance', v)}
+              />
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 12, color: T.textMuted, marginBottom: 6, display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Ползунок</span>
+                  <b style={{ color: '#f97316' }}>{Math.round((selectedComp.wiper ?? 0.5) * 100)}%</b>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={selectedComp.wiper ?? 0.5}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    setComponents((prev) =>
+                      prev.map((c) => (c.id === selectedComp.id ? { ...c, wiper: v } : c))
+                    );
+                  }}
+                  style={{ width: '100%', accentColor: '#f97316', height: 4 }}
+                />
+              </div>
+            </>
+          )}
 
           {selectedComp.type === 'lamp' && analysis.burntLamps.has(selectedComp.id) && (
             <div style={{ marginBottom: 12, padding: 12, background: T.dangerSoft, border: `1px solid ${T.danger}`, borderRadius: 8 }}>
@@ -2153,19 +2349,15 @@ export default function App() {
       <Canvas
         shadows
         camera={{ position: [9, 8, 10], fov: 50 }}
-        gl={{ antialias: true }}
-        onCreated={({ camera, size, raycaster, scene }) => {
-          // @ts-ignore
-          (window as any).__r3fCamera = camera;
-          // @ts-ignore
-          (window as any).__r3fSize = size;
-          // @ts-ignore
-          (window as any).__r3fRaycaster = raycaster;
-          // @ts-ignore
-          (window as any).__r3fScene = scene;
-          // @ts-ignore
-          (window as any).__r3fCanvas = document.querySelector('canvas');
-        }}
+        gl={{ antialias: true, preserveDrawingBuffer: true }}
+onCreated={({ camera, size, raycaster, scene, pointer }) => {
+  (window as any).__r3fCamera = camera;
+  (window as any).__r3fSize = size;
+  (window as any).__r3fRaycaster = raycaster;
+  (window as any).__r3fScene = scene;
+  (window as any).__r3fPointer = pointer;
+  (window as any).__r3fCanvas = document.querySelector('canvas');
+}}
       >
         <color attach="background" args={[T.sceneBg]} />
         <fog attach="fog" args={[T.fogColor, T.fogNear, T.fogFar]} />
@@ -2215,6 +2407,11 @@ export default function App() {
             onPinDown={handlePinDown}
             onPinUp={handlePinUp}
             onToggleSwitch={() => toggleSwitch(comp.id)}
+                        onChangeWiper={(v) => {
+              setComponents((prev) =>
+                prev.map((c) => (c.id === comp.id ? { ...c, wiper: v } : c))
+              );
+            }}
             ammeterCurrent={analysis.currentAmps}
             voltmeterVoltage={analysis.batteryVoltage}
             energized={analysis.closed}
@@ -2259,7 +2456,19 @@ export default function App() {
             </group>
           );
         })}
-
+  {onlineUsers
+  .filter((u) => u.cursor)
+  .map((u) => (
+    <RemoteCursor
+      key={`cursor-${u.id}`}
+      cursor={{
+        id: u.id,
+        color: u.color,
+        position: u.cursor!,
+        name: u.name || u.id.slice(-4),
+      }}
+    />
+  ))}
         <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.1} minDistance={4} maxDistance={45} maxPolarAngle={Math.PI / 2.1} />
       </Canvas>
 

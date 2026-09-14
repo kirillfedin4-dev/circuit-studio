@@ -18,6 +18,9 @@ const LESSON_COMPONENTS: { type: ComponentType; icon: string; label: string }[] 
   { type: 'ammeter', icon: '📏', label: 'Амп.' },
   { type: 'voltmeter', icon: '📐', label: 'Вольт.' },
   { type: 'ground', icon: '⏚', label: 'GND' },
+  { type: 'transistor', icon: '🔺', label: 'Транзистор' },
+  { type: 'diode', icon: '🔷', label: 'Диод' },
+  { type: 'potentiometer', icon: '🎚️', label: 'Потенц.' },
 ];
 
 interface LessonViewProps {

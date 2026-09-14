@@ -216,4 +216,129 @@ export const LESSONS: Lesson[] = [
       return { passed: true, message: 'Делитель напряжения собран! 🎉' };
     },
   },
+    {
+    id: 'two-lamps-series',
+    title: 'Две лампы последовательно',
+    shortTitle: 'Последоват.',
+    icon: '💡💡',
+    description: 'Соедини две лампы последовательно — ток идёт через обе. Они будут гореть тусклее, чем одна.',
+    hint: 'Батарея → лампа 1 → лампа 2 → батарея. Пины A и B у ламп.',
+    requirements: ['🔋 Батарея', '💡 Лампа ×2', '3 провода'],
+    check: (comps, wires) => {
+      const lamps = comps.filter((c) => c.type === 'lamp');
+      if (lamps.length < 2) return { passed: false, message: 'Нужно минимум 2 лампы' };
+      if (!isClosedCircuit(comps, wires)) {
+        return { passed: false, message: 'Цепь не замкнута. Соедини лампы последовательно.' };
+      }
+      // Проверяем, что обе лампы в цепи
+      if (!isInCircuit(lamps[0].id, comps, wires) || !isInCircuit(lamps[1].id, comps, wires)) {
+        return { passed: false, message: 'Обе лампы должны быть в цепи' };
+      }
+      return { passed: true, message: 'Две лампы горят последовательно! 🎉' };
+    },
+  },
+  {
+    id: 'two-lamps-parallel',
+    title: 'Две лампы параллельно',
+    shortTitle: 'Параллельно',
+    icon: '💡⚡',
+    description: 'Соедини две лампы параллельно — каждая получит полное напряжение батареи.',
+    hint: 'Оба пина A обеих ламп — к +, оба пина B — к −. Или через промежуточные провода.',
+    requirements: ['🔋 Батарея', '💡 Лампа ×2', '4 провода'],
+    check: (comps, wires) => {
+      const lamps = comps.filter((c) => c.type === 'lamp');
+      if (lamps.length < 2) return { passed: false, message: 'Нужно минимум 2 лампы' };
+      if (!isClosedCircuit(comps, wires)) {
+        return { passed: false, message: 'Цепь не замкнута' };
+      }
+      // Проверяем, что у каждой лампы есть отдельный путь к + и -
+      // Упрощённо: обе лампы в цепи и у них общие узлы
+      const bothInCircuit =
+        isInCircuit(lamps[0].id, comps, wires) &&
+        isInCircuit(lamps[1].id, comps, wires);
+      if (!bothInCircuit) {
+        return { passed: false, message: 'Обе лампы должны быть в цепи' };
+      }
+      // Эвристика: если ламп больше 1 и они не соединены последовательно —
+      // значит, параллельно. Проверим через наличие провода между A→B ламп.
+      const seriesWire = wires.some(
+        (w) =>
+          (w.fromComp === lamps[0].id && w.toComp === lamps[1].id) ||
+          (w.fromComp === lamps[1].id && w.toComp === lamps[0].id),
+      );
+      if (seriesWire) {
+        return {
+          passed: false,
+          message: 'Похоже на последовательное соединение. Для параллельного обе лампы должны быть подключены к одним и тем же узлам.',
+        };
+      }
+      return { passed: true, message: 'Параллельное соединение собрано! 🎉' };
+    },
+  },
+  {
+    id: 'ammeter',
+    title: 'Измерь ток амперметром',
+    shortTitle: 'Амперметр',
+    icon: '📏',
+    description: 'Амперметр включается ПОСЛЕДОВАТЕЛЬНО с нагрузкой. Он покажет ток в цепи.',
+    hint: 'Батарея → амперметр (IN) → лампа → батарея. Пин OUT амперметра — к следующему элементу.',
+    requirements: ['🔋 Батарея', '📏 Амперметр', '💡 Лампа'],
+    check: (comps, wires) => {
+      const am = comps.find((c) => c.type === 'ammeter');
+      const lamp = comps.find((c) => c.type === 'lamp');
+      if (!am || !lamp) return { passed: false, message: 'Нужны амперметр и лампа' };
+      if (!isClosedCircuit(comps, wires)) {
+        return { passed: false, message: 'Цепь не замкнута' };
+      }
+      if (!isInCircuit(am.id, comps, wires)) {
+        return { passed: false, message: 'Амперметр должен быть в цепи последовательно' };
+      }
+      if (!isInCircuit(lamp.id, comps, wires)) {
+        return { passed: false, message: 'Лампа должна быть в цепи' };
+      }
+      return { passed: true, message: 'Ток измерен! Посмотри на показания амперметра 📏' };
+    },
+  },
+  {
+    id: 'voltmeter',
+    title: 'Измерь напряжение вольтметром',
+    shortTitle: 'Вольтметр',
+    icon: '📐',
+    description: 'Вольтметр включается ПАРАЛЛЕЛЬНО участку, на котором меряем напряжение.',
+    hint: 'Собери цепь с батареей и лампой. Вольтметр подключи параллельно лампе: + вольтметра к + лампы, − вольтметра к − лампы.',
+    requirements: ['🔋 Батарея', '💡 Лампа', '📐 Вольтметр'],
+    check: (comps, wires) => {
+      const vm = comps.find((c) => c.type === 'voltmeter');
+      const lamp = comps.find((c) => c.type === 'lamp');
+      if (!vm || !lamp) return { passed: false, message: 'Нужны вольтметр и лампа' };
+      if (!isClosedCircuit(comps, wires)) {
+        return { passed: false, message: 'Основная цепь не замкнута' };
+      }
+      // Проверяем, что вольтметр подключён хотя бы одним пином к проводу
+      const vmWires = wires.filter(
+        (w) => w.fromComp === vm.id || w.toComp === vm.id,
+      );
+      if (vmWires.length < 2) {
+        return {
+          passed: false,
+          message: 'Вольтметр должен быть подключён двумя проводами параллельно лампе',
+        };
+      }
+      // Проверяем, что один из пинов вольтметра соединён с лампой (напрямую или через узел)
+      const connectedToLamp = vmWires.some(
+        (w) =>
+          w.fromComp === lamp.id ||
+          w.toComp === lamp.id ||
+          w.fromComp === vm.id && w.toComp === lamp.id ||
+          w.fromComp === lamp.id && w.toComp === vm.id,
+      );
+      if (!connectedToLamp) {
+        return {
+          passed: false,
+          message: 'Подключи вольтметр к той же точке, где находится лампа',
+        };
+      }
+      return { passed: true, message: 'Вольтметр подключён параллельно! 📐' };
+    },
+  },
 ];
