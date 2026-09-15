@@ -32,6 +32,8 @@ function getOtherPin(type: string, pin: string): string | null {
       return pin === 'IN' ? 'OUT' : 'IN';
     default:
       return null;
+          case 'potentiometer':
+      return null;
   }
 }
 
@@ -339,6 +341,157 @@ export const LESSONS: Lesson[] = [
         };
       }
       return { passed: true, message: 'Вольтметр подключён параллельно! 📐' };
+    },
+  },
+    {
+    id: 'diode-forward',
+    title: 'Диод пропускает ток',
+    shortTitle: 'Диод',
+    icon: '🔷',
+    description: 'Диод проводит ток только в одну сторону: от анода (A) к катоду (K). Собери цепь с диодом в прямом включении.',
+    hint: 'Батарея.+ → Резистор → Диод.A, Диод.K → Лампа.A, Лампа.B → Батарея.−. Пин A диода — слева, K — справа.',
+    requirements: ['🔋 Батарея', '🔷 Диод', '💡 Лампа'],
+    check: (comps, wires) => {
+      const diode = comps.find((c) => c.type === 'diode');
+      const lamp = comps.find((c) => c.type === 'lamp');
+      const bat = comps.find((c) => c.type === 'battery');
+      if (!diode || !lamp || !bat) return { passed: false, message: 'Нужны батарея, диод и лампа' };
+      if (!isClosedCircuit(comps, wires)) {
+        return {
+          passed: false,
+          message: 'Цепь не замкнута. Проверь направление диода: анод (A) должен смотреть в сторону + батареи.',
+        };
+      }
+      if (!isInCircuit(diode.id, comps, wires)) {
+        return { passed: false, message: 'Диод не в цепи — включи его последовательно' };
+      }
+      return {
+        passed: true,
+        message: 'Ток идёт от A к K, диод открыт! 🎉',
+      };
+    },
+  },
+  {
+    id: 'diode-reverse',
+    title: 'Обратное включение диода',
+    shortTitle: 'Диод назад',
+    icon: '🔶',
+    description: 'Если перевернуть диод — ток не пойдёт. Убедись, что цепь не замыкается.',
+    hint: 'Поверни диод на 180° (выдели → кнопка Y↻ или клавиша E). Лампа не должна гореть.',
+    requirements: ['🔋 Батарея', '🔷 Диод (перевёрнут)', '💡 Лампа'],
+    check: (comps, wires) => {
+      const diode = comps.find((c) => c.type === 'diode');
+      const lamp = comps.find((c) => c.type === 'lamp');
+      const bat = comps.find((c) => c.type === 'battery');
+      if (!diode || !lamp || !bat) return { passed: false, message: 'Нужны батарея, диод и лампа' };
+      if (isClosedCircuit(comps, wires)) {
+        return {
+          passed: false,
+          message: 'Цепь всё ещё замкнута — значит, диод пропускает ток. Поверни его так, чтобы катод (K) смотрел в сторону +.',
+        };
+      }
+      // Дополнительно: убедимся, что провод к диоду есть, но ток не идёт
+      const wiresToDiode = wires.filter(
+        (w) => w.fromComp === diode.id || w.toComp === diode.id
+      );
+      if (wiresToDiode.length < 2) {
+        return { passed: false, message: 'Диод должен быть подключён двумя проводами' };
+      }
+      return {
+        passed: true,
+        message: 'Диод закрыт, ток не идёт — правильно! 🎉',
+      };
+    },
+  },
+  {
+    id: 'potentiometer-dim',
+    title: 'Регулировка яркости',
+    shortTitle: 'Потенциометр',
+    icon: '🎚️',
+    description: 'Потенциометр позволяет плавно менять сопротивление. Чем больше сопротивление — тем тусклее лампа.',
+    hint: 'Собери цепь как с обычным резистором, но вместо него — потенциометр. Потяни рукоятку в сторону, чтобы изменить яркость.',
+    requirements: ['🔋 Батарея', '🎚️ Потенциометр', '💡 Лампа'],
+    check: (comps, wires) => {
+      const pot = comps.find((c) => c.type === 'potentiometer');
+      const lamp = comps.find((c) => c.type === 'lamp');
+      const bat = comps.find((c) => c.type === 'battery');
+      if (!pot || !lamp || !bat) return { passed: false, message: 'Нужны батарея, потенциометр и лампа' };
+      if (!isClosedCircuit(comps, wires)) {
+        return { passed: false, message: 'Цепь не замкнута' };
+      }
+      if (!isInCircuit(pot.id, comps, wires)) {
+        return { passed: false, message: 'Потенциометр должен быть в цепи' };
+      }
+      // Проверяем, что wiper не на минимуме и не на максимуме — то есть им пользовались
+      const wiper = pot.wiper ?? 0.5;
+      if (wiper < 0.05 || wiper > 0.95) {
+        return {
+          passed: false,
+          message: `Ползунок на краю (${Math.round(wiper * 100)}%). Подвигай его, чтобы понять, как он влияет на яркость.`,
+        };
+      }
+      return { passed: true, message: 'Потенциометр в цепи, яркость регулируется! 🎉' };
+    },
+  },
+  {
+    id: 'transistor-switch',
+    title: 'Транзистор как ключ',
+    shortTitle: 'Транзистор',
+    icon: '🔺',
+    description: 'Транзистор может работать как управляемый выключатель. Собери цепь с транзистором и лампой.',
+    hint: 'Батарея.+ → Лампа.A, Лампа.B → Транзистор.C, Транзистор.E → Батарея.−. База (B) управляет открытием.',
+    requirements: ['🔋 Батарея', '🔺 Транзистор', '💡 Лампа'],
+    check: (comps, wires) => {
+      const tr = comps.find((c) => c.type === 'transistor');
+      const lamp = comps.find((c) => c.type === 'lamp');
+      const bat = comps.find((c) => c.type === 'battery');
+      if (!tr || !lamp || !bat) return { passed: false, message: 'Нужны батарея, транзистор и лампа' };
+      // Проверим, что к транзистору подключены хотя бы 3 провода (B, C, E)
+      const trWires = wires.filter(
+        (w) => w.fromComp === tr.id || w.toComp === tr.id
+      );
+      if (trWires.length < 3) {
+        return {
+          passed: false,
+          message: `К транзистору подключено ${trWires.length} провода. Нужно 3: база (B), коллектор (C), эмиттер (E).`,
+        };
+      }
+      // Проверим, что лампа в цепи
+      if (!isInCircuit(lamp.id, comps, wires)) {
+        return { passed: false, message: 'Лампа должна быть в цепи' };
+      }
+      return {
+        passed: true,
+        message: 'Транзистор подключён по схеме с общим эмиттером! 🎉',
+      };
+    },
+  },
+  {
+    id: 'voltmeter-parallel',
+    title: 'Вольтметр на лампе',
+    shortTitle: 'Вольтметр',
+    icon: '📐',
+    description: 'Вольтметр включается параллельно тому участку, напряжение на котором мы измеряем.',
+    hint: 'Собери цепь батарея → лампа → резистор → батарея. Вольтметр подключи параллельно лампе: + к +, − к −.',
+    requirements: ['🔋 Батарея', '💡 Лампа', '📐 Вольтметр'],
+    check: (comps, wires) => {
+      const vm = comps.find((c) => c.type === 'voltmeter');
+      const lamp = comps.find((c) => c.type === 'lamp');
+      const bat = comps.find((c) => c.type === 'battery');
+      if (!vm || !lamp || !bat) return { passed: false, message: 'Нужны батарея, лампа и вольтметр' };
+      if (!isClosedCircuit(comps, wires)) {
+        return { passed: false, message: 'Основная цепь не замкнута' };
+      }
+      const vmWires = wires.filter(
+        (w) => w.fromComp === vm.id || w.toComp === vm.id
+      );
+      if (vmWires.length < 2) {
+        return { passed: false, message: 'К вольтметру нужно 2 провода — он подключается параллельно' };
+      }
+      return {
+        passed: true,
+        message: 'Вольтметр подключён параллельно! Смотри показания. 🎉',
+      };
     },
   },
 ];

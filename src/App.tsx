@@ -92,7 +92,10 @@ function getOtherPin(type: string, pin: string): string | null {
     case 'transistor':
       return null;
     case 'potentiometer':
-      return null;
+      // Пока считаем как обычный резистор между A и B
+      if (pin === 'A') return 'B';
+      if (pin === 'B') return 'A';
+      return null; // W — не ведёт никуда
     default:
       return null;
   }
@@ -625,20 +628,17 @@ function DraggableComponent({
         />
       )}
 
-      {PINS[comp.type].map((pin) => {
-        const rotated = rotateOffset3D(pin.offset, rot);
-        return (
-          <PinMarker
-            key={pin.name}
-            pin={{ ...pin, offset: rotated }}
-            compId={comp.id}
-            active={connectSource?.comp === comp.id && connectSource?.pin === pin.name}
-            highlighted={!!connectSource}
-            onPinDown={onPinDown}
-            onPinUp={onPinUp}
-          />
-        );
-      })}
+      {PINS[comp.type].map((pin) => (
+        <PinMarker
+          key={pin.name}
+          pin={pin}
+          compId={comp.id}
+          active={connectSource?.comp === comp.id && connectSource?.pin === pin.name}
+          highlighted={!!connectSource}
+          onPinDown={onPinDown}
+          onPinUp={onPinUp}
+        />
+      ))}
     </group>
   );
 }
@@ -856,6 +856,7 @@ function analyzeCircuit(components: CircuitComponent[], wires: Wire[]): ChainAna
         }
         if (c.type === 'led') litLamps.add(c.id);
         if (c.type === 'diode') litLamps.add(c.id);
+        if (c.type === 'potentiometer') R += (c.resistance ?? 1000);
       });
     } else errors.push(`⚠ Цепь не замкнута`);
   }
