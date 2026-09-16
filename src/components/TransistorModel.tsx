@@ -17,66 +17,112 @@ export default function TransistorModel({
 
   return (
     <group>
-      {/* Корпус — полуцилиндр / D-образная форма */}
-      <mesh castShadow position={[0, 0.35, 0]}>
-        <cylinderGeometry args={[0.35, 0.35, 0.7, 24, 1, false, 0, Math.PI]} />
+      {/* Корпус — простой чёрный куб со скруглениями */}
+      <mesh castShadow position={[0, 0.4, 0]}>
+        <boxGeometry args={[0.9, 0.7, 0.7]} />
         <meshStandardMaterial
-          color={selected ? '#ef4444' : open ? '#10b981' : '#1e293b'}
+          color={selected ? '#ef4444' : '#1e293b'}
+          metalness={0.5}
+          roughness={0.5}
+        />
+      </mesh>
+
+      {/* Верхняя грань — светлее, чтобы читалась форма */}
+      <mesh position={[0, 0.76, 0]}>
+        <boxGeometry args={[0.92, 0.03, 0.72]} />
+        <meshStandardMaterial color="#334155" metalness={0.6} roughness={0.4} />
+      </mesh>
+
+      {/* Большая стрелка-индикатор на верхней грани (кликабельная) */}
+      <mesh
+        position={[0, 0.79, 0]}
+        rotation={[-Math.PI / 2, 0, open ? -Math.PI / 2 : Math.PI / 2]}
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggle();
+        }}
+        onPointerOver={(e) => {
+          e.stopPropagation();
+          setHovered(true);
+          document.body.style.cursor = 'pointer';
+        }}
+        onPointerOut={() => {
+          setHovered(false);
+          document.body.style.cursor = 'default';
+        }}
+      >
+        <coneGeometry args={[0.18, 0.4, 3]} />
+        <meshStandardMaterial
+          color={hovered ? '#f59e0b' : open ? '#10b981' : '#64748b'}
+          emissive={hovered ? '#f59e0b' : open ? '#10b981' : '#000'}
+          emissiveIntensity={hovered || open ? 1.2 : 0}
           metalness={0.7}
           roughness={0.3}
         />
       </mesh>
 
-      {/* Плоская задняя стенка */}
-      <mesh position={[0, 0.35, -0.01]}>
-        <boxGeometry args={[0.7, 0.7, 0.02]} />
-        <meshStandardMaterial color={selected ? '#ef4444' : '#0f172a'} metalness={0.6} roughness={0.4} />
+      {/* Точка-индикатор состояния (маленькая, рядом со стрелкой) */}
+      <mesh position={[0.32, 0.79, 0.25]}>
+        <circleGeometry args={[0.06, 16]} />
+        <meshBasicMaterial color={open ? '#10b981' : '#64748b'} />
       </mesh>
 
-      {/* Ножки: B, C, E */}
-      <mesh position={[-0.8, 0.3, 0]} rotation={[0, 0, Math.PI / 2]}>
-        <cylinderGeometry args={[0.04, 0.04, 0.55, 10]} />
-        <meshStandardMaterial color="#c0c0c0" metalness={1} roughness={0.15} />
+      {/* Три ножки: B, C, E — с цветными маркерами */}
+      {/* База (B) — слева */}
+      <mesh castShadow position={[-0.85, 0.3, 0]} rotation={[0, 0, Math.PI / 2]}>
+        <cylinderGeometry args={[0.045, 0.045, 0.7, 10]} />
+        <meshStandardMaterial color="#d4d4d8" metalness={1} roughness={0.15} />
       </mesh>
-      <mesh position={[0.7, 0.7, 0]} rotation={[0, 0, Math.PI / 2]}>
-        <cylinderGeometry args={[0.04, 0.04, 0.35, 10]} />
-        <meshStandardMaterial color="#c0c0c0" metalness={1} roughness={0.15} />
-      </mesh>
-      <mesh position={[0.7, -0.1, 0]} rotation={[0, 0, Math.PI / 2]}>
-        <cylinderGeometry args={[0.04, 0.04, 0.35, 10]} />
-        <meshStandardMaterial color="#c0c0c0" metalness={1} roughness={0.15} />
+      <mesh position={[-0.55, 0.4, 0]}>
+        <sphereGeometry args={[0.07, 12, 12]} />
+        <meshStandardMaterial color="#eab308" emissive="#ca8a04" emissiveIntensity={0.6} />
       </mesh>
 
-      {/* Индикатор состояния (стрелка эмиттера) */}
-      <mesh
-        position={[0.4, 0.3, 0]}
-        rotation={[0, 0, open ? -Math.PI / 4 : Math.PI / 4]}
-        onClick={(e) => { e.stopPropagation(); onToggle(); }}
-        onPointerOver={(e) => { e.stopPropagation(); setHovered(true); document.body.style.cursor = 'pointer'; }}
-        onPointerOut={() => { setHovered(false); document.body.style.cursor = 'default'; }}
-      >
-        <coneGeometry args={[0.08, 0.2, 8]} />
-        <meshStandardMaterial
-          color={hovered ? '#f59e0b' : open ? '#10b981' : '#64748b'}
-          emissive={hovered ? '#f59e0b' : open ? '#10b981' : '#000'}
-          emissiveIntensity={hovered || open ? 0.7 : 0}
-        />
+      {/* Коллектор (C) — справа сверху */}
+      <mesh castShadow position={[0.7, 0.7, 0]} rotation={[0, 0, Math.PI / 2]}>
+        <cylinderGeometry args={[0.045, 0.045, 0.35, 10]} />
+        <meshStandardMaterial color="#d4d4d8" metalness={1} roughness={0.15} />
+      </mesh>
+      <mesh position={[0.5, 0.7, 0]}>
+        <sphereGeometry args={[0.07, 12, 12]} />
+        <meshStandardMaterial color="#0ea5e9" emissive="#0284c7" emissiveIntensity={0.6} />
       </mesh>
 
-      {/* Точка на базе */}
-      <mesh position={[-0.55, 0.35, 0]}>
-        <sphereGeometry args={[0.06, 12, 12]} />
-        <meshStandardMaterial color="#eab308" emissive="#ca8a04" emissiveIntensity={0.4} />
+      {/* Эмиттер (E) — справа снизу */}
+      <mesh castShadow position={[0.7, -0.05, 0]} rotation={[0, 0, Math.PI / 2]}>
+        <cylinderGeometry args={[0.045, 0.045, 0.35, 10]} />
+        <meshStandardMaterial color="#d4d4d8" metalness={1} roughness={0.15} />
+      </mesh>
+      <mesh position={[0.5, -0.05, 0]}>
+        <sphereGeometry args={[0.07, 12, 12]} />
+        <meshStandardMaterial color="#ef4444" emissive="#dc2626" emissiveIntensity={0.6} />
       </mesh>
 
-      {/* Подпись */}
-      <Html position={[0, 1.15, 0]} center distanceFactor={10}>
-        <div style={{
-          ...labelStyle,
-          background: open ? 'rgba(16,185,129,0.95)' : 'rgba(139,92,246,0.95)',
-          color: '#fff',
-          borderColor: open ? '#10b981' : '#8b5cf6',
-        }}>
+      {/* Подписи пинов на ножках */}
+      <Html position={[-0.55, 0.7, 0]} center distanceFactor={12}>
+        <div style={{ fontSize: 10, color: '#eab308', fontWeight: 700, pointerEvents: 'none' }}>B</div>
+      </Html>
+      <Html position={[0.5, 1.0, 0]} center distanceFactor={12}>
+        <div style={{ fontSize: 10, color: '#0ea5e9', fontWeight: 700, pointerEvents: 'none' }}>C</div>
+      </Html>
+      <Html position={[0.5, -0.35, 0]} center distanceFactor={12}>
+        <div style={{ fontSize: 10, color: '#ef4444', fontWeight: 700, pointerEvents: 'none' }}>E</div>
+      </Html>
+
+      {/* Свечение при открытом */}
+      {open && (
+        <pointLight position={[0, 0.4, 0]} intensity={0.4} distance={2.5} color="#10b981" />
+      )}
+
+      <Html position={[0, 1.3, 0]} center distanceFactor={10}>
+        <div
+          style={{
+            ...labelStyle,
+            background: open ? 'rgba(16,185,129,0.95)' : 'rgba(139,92,246,0.95)',
+            color: '#fff',
+            borderColor: open ? '#10b981' : '#8b5cf6',
+          }}
+        >
           🔺 {open ? 'ОТКР' : 'ЗАКР'} · hFE={hFE}
         </div>
       </Html>

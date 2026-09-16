@@ -23,7 +23,6 @@ import RemoteCursor from './components/RemoteCursor';
 import TransistorModel from './components/TransistorModel';
 import DiodeModel from './components/DiodeModel';
 import PotentiometerModel from './components/PotentiometerModel';
-// ---------- SubCircuit ----------
 
 interface SubCircuit {
   id: string;
@@ -44,16 +43,16 @@ const PINS: Record<ComponentType, { name: string; offset: [number, number, numbe
   ground: [{ name: 'GND', offset: [0, 0.6, 0] }],
   ammeter: [{ name: 'IN', offset: [-0.9, 0.2, 0] }, { name: 'OUT', offset: [0.9, 0.2, 0] }],
   voltmeter: [{ name: '+', offset: [-0.9, 0.2, 0] }, { name: '-', offset: [0.9, 0.2, 0] }],
-    transistor: [
-    { name: 'B', offset: [-0.8, 0.3, 0] },
+  transistor: [
+    { name: 'B', offset: [-0.85, 0.3, 0] },
     { name: 'C', offset: [0.7, 0.7, 0] },
-    { name: 'E', offset: [0.7, -0.1, 0] },
+    { name: 'E', offset: [0.7, -0.05, 0] },
   ],
-    diode: [
+  diode: [
     { name: 'A', offset: [-0.6, 0.3, 0] },
     { name: 'K', offset: [0.6, 0.3, 0] },
   ],
-    potentiometer: [
+  potentiometer: [
     { name: 'A', offset: [-1, 0.3, 0] },
     { name: 'W', offset: [0, 1.2, 0] },
     { name: 'B', offset: [1, 0.3, 0] },
@@ -75,6 +74,16 @@ function rotateOffset3D(offset: [number, number, number], rot: [number, number, 
   return [x, y, z];
 }
 
+function getComponentResistance(c: CircuitComponent): number {
+  if (c.type === 'resistor') return c.resistance ?? 220;
+  if (c.type === 'lamp') return (c.rating ?? 1) * 100;
+  if (c.type === 'led') return 150;
+  if (c.type === 'diode') return 50;
+  if (c.type === 'ammeter') return 0.01;
+  if (c.type === 'potentiometer') return (c.resistance ?? 1000) * (c.wiper ?? 0.5);
+  return 0;
+}
+
 function getOtherPin(type: string, pin: string): string | null {
   switch (type) {
     case 'resistor':
@@ -92,16 +101,13 @@ function getOtherPin(type: string, pin: string): string | null {
     case 'transistor':
       return null;
     case 'potentiometer':
-      // Пока считаем как обычный резистор между A и B
       if (pin === 'A') return 'B';
       if (pin === 'B') return 'A';
-      return null; // W — не ведёт никуда
+      return null;
     default:
       return null;
   }
 }
-
-// ---------- Звук ----------
 
 const audioCtxRef: { current: AudioContext | null } = { current: null };
 
@@ -193,8 +199,6 @@ function LampHum({ active, volume, muted }: { active: boolean; volume: number; m
 
   return null;
 }
-
-// ---------- 3D-модели ----------
 
 function BatteryModel({ selected, voltage }: { selected: boolean; voltage: number }) {
   return (
@@ -415,12 +419,11 @@ function SmokeParticles({ position }: { position: [number, number, number] }) {
   );
 }
 
-// ---------- Пин ----------
-
-function PinMarker({ pin, compId, onPinDown, onPinUp, active, highlighted }: {
+function PinMarker({ pin, compId, onPinDown, onPinUp, onCancel, active, highlighted }: {
   pin: { name: string; offset: [number, number, number] }; compId: string;
   onPinDown: (ref: { comp: string; pin: string }, e: ThreeEvent<PointerEvent>) => void;
   onPinUp: (ref: { comp: string; pin: string }) => void;
+  onCancel: () => void;
   active: boolean; highlighted: boolean;
 }) {
   const [hovered, setHovered] = useState(false);
@@ -428,7 +431,15 @@ function PinMarker({ pin, compId, onPinDown, onPinUp, active, highlighted }: {
   return (
     <group position={pin.offset}>
       <mesh
-        onPointerDown={(e) => { e.stopPropagation(); onPinDown(ref, e); }}
+        onPointerDown={(e) => {
+          e.stopPropagation();
+          // @ts-ignore
+          if ((e as any).button === 2) {
+            onCancel();
+            return;
+          }
+          onPinDown(ref, e);
+        }}
         onPointerUp={(e) => { e.stopPropagation(); onPinUp(ref); }}
         onPointerOver={(e) => { e.stopPropagation(); setHovered(true); document.body.style.cursor = 'crosshair'; }}
         onPointerOut={() => { setHovered(false); document.body.style.cursor = 'default'; }}
@@ -447,18 +458,20 @@ function PinMarker({ pin, compId, onPinDown, onPinUp, active, highlighted }: {
         <sphereGeometry args={[0.35, 12, 12]} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
-      {hovered && (<Html position={[0, 0.35, 0]} center distanceFactor={12}><div style={pinLabelStyle}>{pin.name}</div></Html>)}
+      {hovered && (
+        <Html position={[0, 0.35, 0]} center distanceFactor={12}>
+          <div style={pinLabelStyle}>{pin.name}</div>
+        </Html>
+      )}
     </group>
   );
 }
 
-// ---------- DraggableComponent ----------
-
 function DraggableComponent({
   comp, selected, lit, burnt, overheated,
   onClick, onDrag, onDragStart, onDragEnd, disableControls, enableControls,
-  connectSource, onPinDown, onPinUp, onToggleSwitch, onChangeWiper,
-  ammeterCurrent, voltmeterVoltage, energized,
+  connectSource, onPinDown, onPinUp, onCancelConnect, onToggleSwitch, onChangeWiper,
+  ammeterReadings, voltmeterReadings, energized,
   remoteUsers, onLampContextMenu, draggedIds,
 }: {
   comp: CircuitComponent;
@@ -470,16 +483,18 @@ function DraggableComponent({
   connectSource: { comp: string; pin: string } | null;
   onPinDown: (ref: { comp: string; pin: string }, e: ThreeEvent<PointerEvent>) => void;
   onPinUp: (ref: { comp: string; pin: string }) => void;
+  onCancelConnect: () => void;
   onToggleSwitch: () => void;
   onChangeWiper: (v: number) => void;
-  ammeterCurrent: number; voltmeterVoltage: number; energized: boolean;
+  ammeterReadings: Map<string, number>;
+  voltmeterReadings: Map<string, number>;
+  energized: boolean;
   remoteUsers: { id: string; color: string; selectedId?: string }[];
   onLampContextMenu?: (compId: string, e: ThreeEvent<MouseEvent>) => void;
   draggedIds: Set<string>;
 }) {
   const [hovered, setHovered] = useState(false);
   const dragging = useRef(false);
-  const dragStart = useRef<[number, number, number]>([0, 0, 0]);
   const { camera, raycaster, pointer } = useThree();
   const plane = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), []);
   const rot = comp.rotation ?? [0, 0, 0];
@@ -488,16 +503,16 @@ function DraggableComponent({
   useEffect(() => {
     const stop = () => {
       if (dragging.current) {
-        dragging.current = false; onDragEnd(); enableControls();
+        dragging.current = false;
+        onDragEnd();
+        enableControls();
       }
     };
     window.addEventListener('pointerup', stop);
     return () => window.removeEventListener('pointerup', stop);
   }, [onDragEnd, enableControls]);
-  
 
   const handlePointerDown = (e: ThreeEvent<PointerEvent>) => {
-    // Правый клик — контекстное меню для лампы
     // @ts-ignore
     if ((e as any).button === 2 && comp.type === 'lamp' && onLampContextMenu) {
       e.stopPropagation();
@@ -515,10 +530,15 @@ function DraggableComponent({
       onClick(e as any);
     }
     dragging.current = true;
-    dragStart.current = [...comp.position];
+    // Пытаемся захватить указатель на canvas
+    const canvas = (window as any).__r3fCanvas as HTMLCanvasElement | null;
+    if (canvas && native.pointerId !== undefined) {
+      try { canvas.setPointerCapture(native.pointerId); } catch {}
+    }
     disableControls();
     onDragStart();
   };
+
   const handlePointerMove = (e: ThreeEvent<PointerEvent>) => {
     if (!dragging.current) return;
     e.stopPropagation();
@@ -589,7 +609,7 @@ function DraggableComponent({
       {comp.type === 'lamp' && (
         <GLBModel path="/models/lamp.glb" fallback={<LampModel selected={selected} lit={lit} burnt={burnt} overheated={overheated} rating={comp.rating ?? 1} />} />
       )}
-      {comp.type === 'voltmeter' && <VoltmeterModel selected={selected} voltage={voltmeterVoltage} energized={energized} />}
+      {comp.type === 'voltmeter' && <VoltmeterModel selected={selected} voltage={voltmeterReadings.get(comp.id) ?? 0} energized={energized} />}
       {comp.type === 'lamp' && burnt && (
         <>
           <SmokeParticles position={[0, 0.5, 0]} />
@@ -604,8 +624,8 @@ function DraggableComponent({
       {comp.type === 'led' && <LedModel selected={selected} lit={lit} burnt={burnt} />}
       {comp.type === 'switch' && <SwitchModel selected={selected} closed={comp.closed ?? false} onToggle={onToggleSwitch} />}
       {comp.type === 'ground' && <GroundModel selected={selected} />}
-      {comp.type === 'ammeter' && <AmmeterModel selected={selected} current={ammeterCurrent} energized={energized} />}
-            {comp.type === 'transistor' && (
+      {comp.type === 'ammeter' && <AmmeterModel selected={selected} current={ammeterReadings.get(comp.id) ?? 0} energized={energized} />}
+      {comp.type === 'transistor' && (
         <TransistorModel
           selected={selected}
           hFE={comp.hFE ?? 100}
@@ -613,13 +633,10 @@ function DraggableComponent({
           onToggle={onToggleSwitch}
         />
       )}
-          {comp.type === 'diode' && (
-        <DiodeModel
-          selected={selected}
-          conducting={lit}
-        />
+      {comp.type === 'diode' && (
+        <DiodeModel selected={selected} conducting={lit} />
       )}
-    {comp.type === 'potentiometer' && (
+      {comp.type === 'potentiometer' && (
         <PotentiometerModel
           selected={selected}
           resistance={comp.resistance ?? 1000}
@@ -637,13 +654,12 @@ function DraggableComponent({
           highlighted={!!connectSource}
           onPinDown={onPinDown}
           onPinUp={onPinUp}
+          onCancel={onCancelConnect}
         />
       ))}
     </group>
   );
 }
-
-// ---------- Провода ----------
 
 function Wire3D({ from, to, energized, shorted, current, selected, onSelect }: {
   from: [number, number, number]; to: [number, number, number];
@@ -743,8 +759,6 @@ function PendingWire3D({ start }: { start: [number, number, number] }) {
   );
 }
 
-// ---------- Логика цепи ----------
-
 interface ChainAnalysis {
   energizedWires: Set<string>;
   shortedWires: Set<string>;
@@ -757,6 +771,8 @@ interface ChainAnalysis {
   totalResistance: number;
   batteryVoltage: number;
   powerPerLamp: Map<string, number>;
+  ammeterReadings: Map<string, number>;
+  voltmeterReadings: Map<string, number>;
 }
 
 function analyzeCircuit(components: CircuitComponent[], wires: Wire[]): ChainAnalysis {
@@ -767,6 +783,8 @@ function analyzeCircuit(components: CircuitComponent[], wires: Wire[]): ChainAna
   const burntLamps = new Set<string>();
   const overheatedLamps = new Set<string>();
   const powerPerLamp = new Map<string, number>();
+  const ammeterReadings = new Map<string, number>();
+  const voltmeterReadings = new Map<string, number>();
   let currentAmps = 0, totalResistance = 0, batteryVoltage = 0;
 
   for (const w of wires) {
@@ -802,22 +820,19 @@ function analyzeCircuit(components: CircuitComponent[], wires: Wire[]): ChainAna
         let next: { comp: string; pin: string } | null = null;
         if (w.fromComp === cur.comp && w.fromPin === cur.pin) { next = { comp: w.toComp, pin: w.toPin }; pathWires.push(w.id); }
         else if (w.toComp === cur.comp && w.toPin === cur.pin) { next = { comp: w.fromComp, pin: w.fromPin }; pathWires.push(w.id); }
-       if (next) {
+        if (next) {
           const comp = components.find((c) => c.id === next!.comp);
           if (comp && comp.type !== 'battery') {
             if (comp.type === 'switch' && !comp.closed) continue;
             if (comp.type === 'voltmeter') continue;
             if (comp.type === 'lamp' && burntLamps.has(comp.id)) continue;
-
-            // ⚡ Диод: ток только от A к K
             if (comp.type === 'diode') {
-              const enteringFrom = next!.pin;       // пин, с которого вошли
+              const enteringFrom = next!.pin;
               const otherPin = enteringFrom === 'A' ? 'K' : 'A';
-              if (enteringFrom !== 'A') continue;   // вошли не с анода — ток не идёт
+              if (enteringFrom !== 'A') continue;
               queue.push({ comp: comp.id, pin: otherPin });
               continue;
             }
-
             const otherPin = getOtherPin(comp.type, next!.pin);
             if (otherPin) queue.push({ comp: comp.id, pin: otherPin });
           } else queue.push(next);
@@ -837,7 +852,8 @@ function analyzeCircuit(components: CircuitComponent[], wires: Wire[]): ChainAna
         if (c.type === 'lamp') R += (c.rating ?? 1) * 100;
         if (c.type === 'led') R += 150;
         if (c.type === 'ammeter') R += 0.01;
-        if (c.type === 'diode') R += 50;    // небольшое сопротивление открытого диода
+        if (c.type === 'diode') R += 50;
+        if (c.type === 'potentiometer') R += (c.resistance ?? 1000);
       });
       if (R <= 0) R = 0.1;
       totalResistance = R;
@@ -856,15 +872,42 @@ function analyzeCircuit(components: CircuitComponent[], wires: Wire[]): ChainAna
         }
         if (c.type === 'led') litLamps.add(c.id);
         if (c.type === 'diode') litLamps.add(c.id);
-        if (c.type === 'potentiometer') R += (c.resistance ?? 1000);
+        if (c.type === 'ammeter') ammeterReadings.set(c.id, I);
       });
     } else errors.push(`⚠ Цепь не замкнута`);
   }
 
-  return { energizedWires, shortedWires, litLamps, burntLamps, overheatedLamps, errors, closed: energizedWires.size > 0, currentAmps, totalResistance, batteryVoltage, powerPerLamp };
-}
+  for (const vm of components.filter((c) => c.type === 'voltmeter')) {
+    const plusWires = wires.filter((w) =>
+      (w.fromComp === vm.id && w.fromPin === '+') ||
+      (w.toComp === vm.id && w.toPin === '+')
+    );
+    const minusWires = wires.filter((w) =>
+      (w.fromComp === vm.id && w.fromPin === '-') ||
+      (w.toComp === vm.id && w.toPin === '-')
+    );
+    if (plusWires.length === 0 || minusWires.length === 0) continue;
+    const plusCompId = plusWires[0].fromComp === vm.id ? plusWires[0].toComp : plusWires[0].fromComp;
+    const minusCompId = minusWires[0].fromComp === vm.id ? minusWires[0].toComp : minusWires[0].fromComp;
+    if (plusCompId === minusCompId) {
+      const target = components.find((c) => c.id === plusCompId);
+      if (!target) continue;
+      let U = 0;
+      const R_target = getComponentResistance(target);
+      if (R_target > 0) U = currentAmps * R_target;
+      voltmeterReadings.set(vm.id, U);
+    } else {
+      voltmeterReadings.set(vm.id, 0);
+    }
+  }
 
-// ---------- App ----------
+  return {
+    energizedWires, shortedWires, litLamps, burntLamps, overheatedLamps,
+    errors, closed: energizedWires.size > 0,
+    currentAmps, totalResistance, batteryVoltage, powerPerLamp,
+    ammeterReadings, voltmeterReadings,
+  };
+}
 
 const COMPONENT_LABELS: Record<ComponentType, { icon: string; name: string; color: string }> = {
   battery: { icon: '🔋', name: 'Батарея', color: '#0ea5e9' },
@@ -909,21 +952,19 @@ export default function App() {
   ]);
   const [wires, setWires] = useState<Wire[]>([]);
 
-  // Мультивыделение: набор ID выделенных компонентов
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-    const [selectedWireId, setSelectedWireId] = useState<string | null>(null);
+  const [selectedWireId, setSelectedWireId] = useState<string | null>(null);
   const [selectedWireIds, setSelectedWireIds] = useState<Set<string>>(new Set());
   const [connectSource, setConnectSource] = useState<{ comp: string; pin: string } | null>(null);
   const [soundOn, setSoundOn] = useState(true);
   const [theme, setTheme] = useState<ThemeKey>('light');
   const [cameraMode, setCameraMode] = useState<'free' | 'orbit'>('free');
-    const [clipboard, setClipboard] = useState<{
+  const [clipboard, setClipboard] = useState<{
     components: CircuitComponent[];
     wires: Wire[];
   } | null>(null);
   const [user, setUser] = useState<ApiUser | null>(null);
   const [showAuth, setShowAuth] = useState(false);
-  
 
   const [screen, setScreen] = useState<'sandbox' | 'lessons' | 'lesson-active'>('sandbox');
   const [activeLessonId, setActiveLessonId] = useState<string | null>(null);
@@ -941,7 +982,6 @@ export default function App() {
   const [lessonTime, setLessonTime] = useState(0);
   const [lampMenu, setLampMenu] = useState<{ x: number; y: number; compId: string } | null>(null);
 
-  // Состояние рамки выделения (в экранных координатах)
   const [marquee, setMarquee] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null);
 
   const [roomId, setRoomId] = useState(() => {
@@ -949,12 +989,12 @@ export default function App() {
     return new URLSearchParams(window.location.search).get('room') || '';
   });
   const [onlineUsers, setOnlineUsers] = useState<{
-  id: string;
-  color: string;
-  selectedId?: string;
-  cursor?: [number, number, number];
-  name?: string;
-}[]>([]);
+    id: string;
+    color: string;
+    selectedId?: string;
+    cursor?: [number, number, number];
+    name?: string;
+  }[]>([]);
   const [mpStatus, setMpStatus] = useState<'off' | 'connecting' | 'connected'>('off');
 
   const controlsRef = useRef<any>(null);
@@ -965,17 +1005,14 @@ export default function App() {
   const historyIndexRef = useRef(-1);
   const [, setHistoryVersion] = useState(0);
 
-  // Рамка
   const marqueeStateRef = useRef<{
     isActive: boolean;
     startX: number;
     startY: number;
     moved: boolean;
   }>({ isActive: false, startX: 0, startY: 0, moved: false });
-    // Флаг: клик по компоненту произошёл, рамку не запускать
   const marqueeBlockedRef = useRef(false);
 
-  // Для drag множества — запоминаем исходные позиции
   const dragStartPositions = useRef<Map<string, [number, number, number]>>(new Map());
   const dragAnchorRef = useRef<[number, number, number] | null>(null);
 
@@ -988,7 +1025,6 @@ export default function App() {
   const T = THEMES[theme];
   const analysis = useMemo(() => analyzeCircuit(components, wires), [components, wires]);
 
-  // Отключаем стандартное контекстное меню браузера на canvas
   useEffect(() => {
     const canvas = document.querySelector('canvas');
     if (!canvas) return;
@@ -1027,15 +1063,8 @@ export default function App() {
     return () => clearInterval(id);
   }, [screen, activeLessonId]);
 
-  // ---------- Рамка выделения ----------
-  // Слушаем pointerdown/move/up на window, чтобы работать поверх Canvas
-  // ---------- Рамка выделения ----------
-  // Слушаем pointerdown в фазе capture, чтобы опередить OrbitControls
-  // ---------- Рамка выделения ----------
-  // ---------- Рамка выделения: Alt + ЛКМ ----------
   useEffect(() => {
     const onPointerDown = (e: PointerEvent) => {
-      // Средняя кнопка мыши (клик колёсиком) ИЛИ Alt+ЛКМ
       const isMiddle = e.button === 1;
       const isAltLeft = e.button === 0 && e.altKey;
       if (!isMiddle && !isAltLeft) return;
@@ -1043,20 +1072,16 @@ export default function App() {
       if (target.closest('[data-ui-panel]')) return;
       if (target.tagName !== 'CANVAS') return;
 
-      if (isMiddle) {
-        e.preventDefault();
-      }
-
+      if (isMiddle) e.preventDefault();
       e.preventDefault();
       e.stopPropagation();
 
-      // Выключаем OrbitControls, чтобы камера не двигалась
       if (controlsRef.current) controlsRef.current.enabled = false;
 
       marqueeStateRef.current.isActive = true;
       marqueeStateRef.current.startX = e.clientX;
       marqueeStateRef.current.startY = e.clientY;
-      marqueeStateRef.current.moved = true; // сразу активна
+      marqueeStateRef.current.moved = true;
       setMarquee({
         startX: e.clientX,
         startY: e.clientY,
@@ -1079,7 +1104,6 @@ export default function App() {
       if (!marqueeStateRef.current.isActive) return;
       marqueeStateRef.current.isActive = false;
 
-      // Включаем OrbitControls обратно
       if (controlsRef.current) controlsRef.current.enabled = true;
 
       const x1 = Math.min(marqueeStateRef.current.startX, e.clientX);
@@ -1087,9 +1111,7 @@ export default function App() {
       const x2 = Math.max(marqueeStateRef.current.startX, e.clientX);
       const y2 = Math.max(marqueeStateRef.current.startY, e.clientY);
 
-      // @ts-ignore
       const cam = (window as any).__r3fCamera;
-      // @ts-ignore
       const sz = (window as any).__r3fSize;
 
       const ids = new Set<string>();
@@ -1104,7 +1126,6 @@ export default function App() {
             ids.add(comp.id);
           }
         }
-        // Провода: считаем середину провода в мировых координатах и проверяем её
         for (const w of wires) {
           const fromComp = components.find((c) => c.id === w.fromComp);
           const toComp = components.find((c) => c.id === w.toComp);
@@ -1133,18 +1154,6 @@ export default function App() {
         }
       }
 
-       console.log('[Marquee] найдено компонентов:', ids.size, 'проводов:', wireIds.size);
-      console.log('[Marquee] проекция первого компонента:', (() => {
-        const c = components[0];
-        if (!c || !cam || !sz) return 'нет данных';
-        const world = new THREE.Vector3(c.position[0], 0, c.position[2]);
-        const proj = world.clone().project(cam);
-        return {
-          sx: (proj.x * 0.5 + 0.5) * sz.width,
-          sy: (-proj.y * 0.5 + 0.5) * sz.height,
-          rect: { x1, y1, x2, y2 },
-        };
-      })());
       setSelectedIds(ids);
       setSelectedWireIds(wireIds);
       setSelectedWireId(null);
@@ -1225,19 +1234,19 @@ export default function App() {
 
     const awareness = provider.awareness;
     yAwarenessRef.current = awareness;
-const updateUsers = () => {
-  const states = Array.from(awareness.getStates().entries()) as [number, any][];
-  const others = states
-    .filter(([id]) => id !== ydoc.clientID)
-    .map(([id, s]) => ({
-      id: String(id),
-      color: s.user?.color || '#a855f7',
-      selectedId: s.user?.selectedId,
-      cursor: s.user?.cursor,
-      name: s.user?.clientId || String(id).slice(-4),
-    }));
-  setOnlineUsers(others);
-};
+    const updateUsers = () => {
+      const states = Array.from(awareness.getStates().entries()) as [number, any][];
+      const others = states
+        .filter(([id]) => id !== ydoc.clientID)
+        .map(([id, s]) => ({
+          id: String(id),
+          color: s.user?.color || '#a855f7',
+          selectedId: s.user?.selectedId,
+          cursor: s.user?.cursor,
+          name: s.user?.clientId || String(id).slice(-4),
+        }));
+      setOnlineUsers(others);
+    };
     awareness.on('change', updateUsers);
     updateUsers();
 
@@ -1281,42 +1290,39 @@ const updateUsers = () => {
       selectedId: first ?? null,
     });
   }, [selectedIds]);
-  // Отправка позиции своего курсора в awareness (throttle ~30 fps)
-useEffect(() => {
-  if (!roomId) return;
-  const { camera, raycaster, pointer } = (window as any).__r3f ?? {};
-  if (!camera) return;
 
-  const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-  const hit = new THREE.Vector3();
-  let rafId = 0;
-  let lastSent = 0;
+  useEffect(() => {
+    if (!roomId) return;
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const hit = new THREE.Vector3();
+    let rafId = 0;
+    let lastSent = 0;
 
-  const tick = () => {
+    const tick = () => {
+      rafId = requestAnimationFrame(tick);
+      const now = performance.now();
+      if (now - lastSent < 33) return;
+      lastSent = now;
+
+      const cam = (window as any).__r3fCamera;
+      const ptr = (window as any).__r3fPointer;
+      const rcast = (window as any).__r3fRaycaster;
+      if (!cam || !ptr || !rcast || !yAwarenessRef.current) return;
+
+      rcast.setFromCamera(ptr, cam);
+      if (rcast.ray.intersectPlane(plane, hit)) {
+        const x = Math.max(-15, Math.min(15, hit.x));
+        const z = Math.max(-15, Math.min(15, hit.z));
+        yAwarenessRef.current.setLocalStateField('user', {
+          ...(yAwarenessRef.current.getLocalState()?.user || {}),
+          cursor: [x, 0, z],
+        });
+      }
+    };
+
     rafId = requestAnimationFrame(tick);
-    const now = performance.now();
-    if (now - lastSent < 33) return; // ~30 fps
-    lastSent = now;
-
-    const cam = (window as any).__r3fCamera;
-    const ptr = (window as any).__r3fPointer;
-    const rcast = (window as any).__r3fRaycaster;
-    if (!cam || !ptr || !rcast || !yAwarenessRef.current) return;
-
-    rcast.setFromCamera(ptr, cam);
-    if (rcast.ray.intersectPlane(plane, hit)) {
-      const x = Math.max(-15, Math.min(15, hit.x));
-      const z = Math.max(-15, Math.min(15, hit.z));
-      yAwarenessRef.current.setLocalStateField('user', {
-        ...(yAwarenessRef.current.getLocalState()?.user || {}),
-        cursor: [x, 0, z],
-      });
-    }
-  };
-
-  rafId = requestAnimationFrame(tick);
-  return () => cancelAnimationFrame(rafId);
-}, [roomId]);
+    return () => cancelAnimationFrame(rafId);
+  }, [roomId]);
 
   useEffect(() => {
     const snapshot = { components: JSON.parse(JSON.stringify(components)), wires: JSON.parse(JSON.stringify(wires)) };
@@ -1390,20 +1396,15 @@ useEffect(() => {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      console.log('[Key] нажато:', e.key, 'ctrl:', e.ctrlKey, 'meta:', e.metaKey);
-         const k = e.key.toLowerCase();
+      const k = e.key.toLowerCase();
       if ((e.ctrlKey || e.metaKey) && (k === 'z' || k === 'я') && !e.shiftKey) { e.preventDefault(); undo(); return; }
       if (((e.ctrlKey || e.metaKey) && (k === 'y' || k === 'н')) || ((e.ctrlKey || e.metaKey) && e.shiftKey && (k === 'z' || k === 'я'))) { e.preventDefault(); redo(); return; }
       if ((e.ctrlKey || e.metaKey) && (k === 'c' || k === 'с')) {
         if (selectedIds.size === 0 && selectedWireIds.size === 0) return;
-        // Копируем все выделенные компоненты
         const comps = components.filter((x) => selectedIds.has(x.id));
-        // И все провода, у которых ОБА конца на выделенных
-        // Провода, у которых оба конца на выделенных компонентах
         const innerWires = wires.filter(
           (w) => selectedIds.has(w.fromComp) && selectedIds.has(w.toComp)
         );
-        // Плюс выделенные провода (рамкой) — тоже копируем
         const extraWires = wires.filter((w) => selectedWireIds.has(w.id));
         const combinedWires = [...innerWires, ...extraWires.filter(
           (w) => !innerWires.some((iw) => iw.id === w.id)
@@ -1415,9 +1416,8 @@ useEffect(() => {
         if (soundOn) playConnect();
         return;
       }
-            if ((e.ctrlKey || e.metaKey) && (k === 'v' || k === 'м')) {
+      if ((e.ctrlKey || e.metaKey) && (k === 'v' || k === 'м')) {
         if (!clipboard || clipboard.components.length === 0) return;
-        // Карта старый id -> новый id
         const idMap = new Map<string, string>();
         const newComps: CircuitComponent[] = clipboard.components.map((c) => {
           const newId = crypto.randomUUID();
@@ -1428,7 +1428,6 @@ useEffect(() => {
             position: [c.position[0] + 1.5, c.position[1], c.position[2] + 1.5],
           };
         });
-        // Восстанавливаем провода с новыми id
         const newWires: Wire[] = clipboard.wires.map((w) => ({
           id: crypto.randomUUID(),
           fromComp: idMap.get(w.fromComp) || w.fromComp,
@@ -1443,7 +1442,7 @@ useEffect(() => {
         if (soundOn) playConnect();
         return;
       }
-            if ((e.ctrlKey || e.metaKey) && (k === 'd' || k === 'в')) {
+      if ((e.ctrlKey || e.metaKey) && (k === 'd' || k === 'в')) {
         e.preventDefault();
         if (selectedIds.size > 0) {
           const newIds: string[] = [];
@@ -1469,7 +1468,6 @@ useEffect(() => {
       }
       if (e.key === 'Delete' || e.key === 'Backspace') {
         let didSomething = false;
-        // Провода
         if (selectedWireIds.size > 0 || selectedWireId) {
           const ids = new Set(selectedWireIds);
           if (selectedWireId) ids.add(selectedWireId);
@@ -1478,7 +1476,6 @@ useEffect(() => {
           setSelectedWireId(null);
           didSomething = true;
         }
-        // Компоненты
         if (selectedIds.size > 0) {
           setComponents((prev) => prev.filter((c) => !selectedIds.has(c.id)));
           setWires((prev) => prev.filter((w) => !selectedIds.has(w.fromComp) && !selectedIds.has(w.toComp)));
@@ -1514,7 +1511,7 @@ useEffect(() => {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-    }, [selectedIds, selectedWireId, selectedWireIds, soundOn, undo, redo, clipboard, components, wires]);
+  }, [selectedIds, selectedWireId, selectedWireIds, soundOn, undo, redo, clipboard, components, wires]);
 
   const disableControls = useCallback(() => { if (controlsRef.current) controlsRef.current.enabled = false; }, []);
   const enableControls = useCallback(() => { if (controlsRef.current) controlsRef.current.enabled = true; }, []);
@@ -1529,7 +1526,6 @@ useEffect(() => {
     if (type === 'lamp') { base.rating = 1; base.lampVolume = 0.5; base.lampMuted = false; }
     if (type === 'capacitor') base.capacitance = 100;
     if (type === 'inductor') base.inductance = 10;
-    if (type === 'transistor') { base.hFE = 100; base.transistorOpen = false; }
     if (type === 'transistor') { base.hFE = 100; base.transistorOpen = false; }
     if (type === 'potentiometer') { base.resistance = 1000; base.wiper = 0.5; }
     setComponents((prev) => [...prev, base]);
@@ -1587,15 +1583,12 @@ useEffect(() => {
     if (soundOn) playConnect();
   };
 
-  // ---------- Перетаскивание группы ----------
   const handleComponentDragStart = (comp: CircuitComponent) => {
-    // Запоминаем позиции всех выделенных на момент старта
     const map = new Map<string, [number, number, number]>();
     for (const id of selectedIds) {
       const c = components.find((x) => x.id === id);
       if (c) map.set(id, [...c.position] as [number, number, number]);
     }
-    // Если текущий компонент не выделен — добавляем только его
     if (!selectedIds.has(comp.id)) {
       map.clear();
       map.set(comp.id, [...comp.position] as [number, number, number]);
@@ -1605,13 +1598,10 @@ useEffect(() => {
   };
 
   const handleComponentDrag = (comp: CircuitComponent, newPos: [number, number, number]) => {
-    // newPos — новая позиция для "ведущего" компонента
     if (dragStartPositions.current.size <= 1) {
-      // Одиночное перетаскивание
       setComponents((prev) => prev.map((c) => (c.id === comp.id ? { ...c, position: newPos } : c)));
       return;
     }
-    // Группа: вычисляем смещение от стартовой позиции ведущего
     const startPos = dragStartPositions.current.get(comp.id);
     if (!startPos) {
       setComponents((prev) => prev.map((c) => (c.id === comp.id ? { ...c, position: newPos } : c)));
@@ -1625,7 +1615,6 @@ useEffect(() => {
       if (sp) {
         return { ...c, position: [sp[0] + dx, 0, sp[2] + dz] };
       }
-      // Если компонент — ведущий, но его не было в map (первый клик)
       if (c.id === comp.id) {
         return { ...c, position: newPos };
       }
@@ -1666,28 +1655,25 @@ useEffect(() => {
       })
     );
   };
-const saveScreenshot = () => {
-  // Ищем canvas именно от react-three-fiber:
-  // у него атрибут data-engine="three.js rXXX" — уникально для Three.js
-  const canvas = document.querySelector('canvas[data-engine]') as HTMLCanvasElement | null
-    // fallback: пробуем window.__r3fCanvas, если он валиден
-    ?? ((window as any).__r3fCanvas as HTMLCanvasElement | null);
 
-  if (!canvas) {
-    alert('Не удалось найти 3D-canvas');
-    return;
-  }
+  const saveScreenshot = () => {
+    const canvas = document.querySelector('canvas[data-engine]') as HTMLCanvasElement | null
+      ?? ((window as any).__r3fCanvas as HTMLCanvasElement | null);
+    if (!canvas) {
+      alert('Не удалось найти 3D-canvas');
+      return;
+    }
+    try {
+      const dataUrl = canvas.toDataURL('image/png');
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = `circuit-${Date.now()}.png`;
+      a.click();
+    } catch (e) {
+      alert('Ошибка экспорта: ' + e);
+    }
+  };
 
-  try {
-    const dataUrl = canvas.toDataURL('image/png');
-    const a = document.createElement('a');
-    a.href = dataUrl;
-    a.download = `circuit-${Date.now()}.png`;
-    a.click();
-  } catch (e) {
-    alert('Ошибка экспорта: ' + e);
-  }
-};
   const saveCircuit = () => {
     const data = JSON.stringify({ components, wires }, null, 2);
     const blob = new Blob([data], { type: 'application/json' });
@@ -2103,8 +2089,8 @@ const saveScreenshot = () => {
                       📋 Экспорт SPICE
                     </button>
                     <button style={{ ...actionBtn(T), background: T.buttonBg, color: T.textMuted }} onClick={saveScreenshot}>
-  📸 Скриншот (PNG)
-</button>
+                      📸 Скриншот (PNG)
+                    </button>
                   </>
                 ),
               },
@@ -2131,7 +2117,6 @@ const saveScreenshot = () => {
         </div>
       )}
 
-      {/* Правая панель — свойства только для одного выделенного */}
       {selectedComp && screen !== 'lesson-active' && (
         <div data-ui-panel style={{
           position: 'absolute', top: 16, right: 16, zIndex: 10,
@@ -2250,7 +2235,6 @@ const saveScreenshot = () => {
         </div>
       )}
 
-      {/* Индикатор мультивыбора */}
       {selectedIds.size > 1 && screen !== 'lesson-active' && (
         <div data-ui-panel style={{
           position: 'absolute', top: 16, right: 16, zIndex: 10,
@@ -2346,19 +2330,18 @@ const saveScreenshot = () => {
         />
       )}
 
-      {/* 3D-сцена */}
       <Canvas
         shadows
         camera={{ position: [9, 8, 10], fov: 50 }}
         gl={{ antialias: true, preserveDrawingBuffer: true }}
-onCreated={({ camera, size, raycaster, scene, pointer }) => {
-  (window as any).__r3fCamera = camera;
-  (window as any).__r3fSize = size;
-  (window as any).__r3fRaycaster = raycaster;
-  (window as any).__r3fScene = scene;
-  (window as any).__r3fPointer = pointer;
-  (window as any).__r3fCanvas = document.querySelector('canvas');
-}}
+        onCreated={({ camera, size, raycaster, scene, pointer }) => {
+          (window as any).__r3fCamera = camera;
+          (window as any).__r3fSize = size;
+          (window as any).__r3fRaycaster = raycaster;
+          (window as any).__r3fScene = scene;
+          (window as any).__r3fPointer = pointer;
+            (window as any).__r3fCanvas = (scene as any).__r3f_canvas ?? (window as any).__r3f_canvas ?? document.querySelector('canvas[data-engine]');
+        }}
       >
         <color attach="background" args={[T.sceneBg]} />
         <fog attach="fog" args={[T.fogColor, T.fogNear, T.fogFar]} />
@@ -2376,7 +2359,18 @@ onCreated={({ camera, size, raycaster, scene, pointer }) => {
           rotation={[-Math.PI / 2, 0, 0]}
           position={[0, -0.01, 0]}
           userData={{ isBackground: true }}
+          onContextMenu={() => {
+            if (connectSource) {
+              setConnectSource(null);
+              enableControls();
+            }
+          }}
           onClick={() => {
+            if (connectSource) {
+              setConnectSource(null);
+              enableControls();
+              return;
+            }
             setSelectedIds(new Set());
             setSelectedWireId(null);
             setSelectedWireIds(new Set());
@@ -2407,14 +2401,18 @@ onCreated={({ camera, size, raycaster, scene, pointer }) => {
             connectSource={connectSource}
             onPinDown={handlePinDown}
             onPinUp={handlePinUp}
+            onCancelConnect={() => {
+              setConnectSource(null);
+              enableControls();
+            }}
             onToggleSwitch={() => toggleSwitch(comp.id)}
-                        onChangeWiper={(v) => {
+            onChangeWiper={(v) => {
               setComponents((prev) =>
                 prev.map((c) => (c.id === comp.id ? { ...c, wiper: v } : c))
               );
             }}
-            ammeterCurrent={analysis.currentAmps}
-            voltmeterVoltage={analysis.batteryVoltage}
+            ammeterReadings={analysis.ammeterReadings}
+            voltmeterReadings={analysis.voltmeterReadings}
             energized={analysis.closed}
             remoteUsers={onlineUsers}
             onLampContextMenu={handleLampContextMenu}
@@ -2457,23 +2455,22 @@ onCreated={({ camera, size, raycaster, scene, pointer }) => {
             </group>
           );
         })}
-  {onlineUsers
-  .filter((u) => u.cursor)
-  .map((u) => (
-    <RemoteCursor
-      key={`cursor-${u.id}`}
-      cursor={{
-        id: u.id,
-        color: u.color,
-        position: u.cursor!,
-        name: u.name || u.id.slice(-4),
-      }}
-    />
-  ))}
+        {onlineUsers
+          .filter((u) => u.cursor)
+          .map((u) => (
+            <RemoteCursor
+              key={`cursor-${u.id}`}
+              cursor={{
+                id: u.id,
+                color: u.color,
+                position: u.cursor!,
+                name: u.name || u.id.slice(-4),
+              }}
+            />
+          ))}
         <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.1} minDistance={4} maxDistance={45} maxPolarAngle={Math.PI / 2.1} />
       </Canvas>
 
-      {/* Рамка выделения (2D оверлей) */}
       {marquee && (
         <div
           style={{
@@ -2500,8 +2497,6 @@ onCreated={({ camera, size, raycaster, scene, pointer }) => {
   );
 }
 
-// ---------- Камера ----------
-
 function CameraController({ mode, controlsRef }: { mode: 'free' | 'orbit'; controlsRef: React.MutableRefObject<any> }) {
   const angleRef = useRef(0);
   useFrame((_, delta) => {
@@ -2515,8 +2510,6 @@ function CameraController({ mode, controlsRef }: { mode: 'free' | 'orbit'; contr
   });
   return null;
 }
-
-// ---------- UI ----------
 
 function SliderField({ label, value, min, max, step, color, theme, onChange }: {
   label: string; value: number; min: number; max: number; step: number; color: string; theme: Theme; onChange: (v: number) => void;
