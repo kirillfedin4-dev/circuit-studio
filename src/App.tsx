@@ -1015,6 +1015,7 @@ export default function App() {
 
   const dragStartPositions = useRef<Map<string, [number, number, number]>>(new Map());
   const dragAnchorRef = useRef<[number, number, number] | null>(null);
+  const lastDragSendRef = useRef(0);
 
   const ydocRef = useRef<Y.Doc | null>(null);
   const yProviderRef = useRef<WebsocketProvider | null>(null);
@@ -1238,14 +1239,25 @@ const applyRemote = () => {
     yComps.observe(applyRemote);
     yWires.observe(applyRemote);
 
-    provider.on('sync', (synced: boolean) => {
-      if (synced && yComps.length === 0 && yWires.length === 0) {
-        yComps.push(components);
-        yWires.push(wires);
-      } else if (synced) {
-        applyRemote();
-      }
+provider.on('sync', (synced: boolean) => {
+  if (synced && yComps.size === 0 && yWires.size === 0) {
+    // Первый клиент — записываем начальное состояние
+    ydoc.transact(() => {
+      components.forEach((comp) => {
+        const yComp = new Y.Map();
+        Object.entries(comp).forEach(([k, v]) => yComp.set(k, v));
+        yComps.set(comp.id, yComp);
+      });
+      wires.forEach((wire) => {
+        const yWire = new Y.Map();
+        Object.entries(wire).forEach(([k, v]) => yWire.set(k, v));
+        yWires.set(wire.id, yWire);
+      });
     });
+  } else if (synced) {
+    applyRemote();
+  }
+});
 
 const awareness = provider.awareness;
 yAwarenessRef.current = awareness;
@@ -1667,10 +1679,12 @@ useEffect(() => {
     dragAnchorRef.current = null;
   };
 
-  const handleComponentDrag = (comp: CircuitComponent, newPos: [number, number, number]) => {
+const handleComponentDrag = (comp: CircuitComponent, newPos: [number, number, number]) => {
   const now = performance.now();
-  if (now - (dragAnchorRef.current as any)?.[0] ?? 0 < 50) return;
-  dragAnchorRef.current = [now, 0, 0];
+  if (now - lastDragSendRef.current < 16) return;  // ~60 fps
+  lastDragSendRef.current = now;
+  // ...
+
     if (dragStartPositions.current.size <= 1) {
       setComponents((prev) => prev.map((c) => (c.id === comp.id ? { ...c, position: newPos } : c)));
       return;
@@ -2468,10 +2482,11 @@ useEffect(() => {
             onClick={(e) => handleComponentClick(comp.id, e)}
             onDrag={(pos) => handleComponentDrag(comp, pos)}
             onDragStart={() => handleComponentDragStart(comp)}
-            onDragEnd={() => { 
+onDragEnd={() => { 
   dragStartPositions.current.clear(); 
   dragAnchorRef.current = null; 
-  isDraggingRef.current = false;  // ← ДОБАВЬ
+  isDraggingRef.current = false;
+  console.log('🔴 DRAG END, isDragging =', isDraggingRef.current);
 }}
             disableControls={disableControls}
             enableControls={enableControls}
