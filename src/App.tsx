@@ -1213,12 +1213,12 @@ export default function App() {
     const yComps = ydoc.getArray<CircuitComponent>('components');
     const yWires = ydoc.getArray<Wire>('wires');
 
-    const applyRemote = () => {
-      isApplyingRemoteRef.current = true;
-      setComponents(yComps.toArray());
-      setWires(yWires.toArray());
-      setTimeout(() => { isApplyingRemoteRef.current = false; }, 0);
-    };
+const applyRemote = () => {
+  isApplyingRemoteRef.current = true;
+  setComponents(yComps.toArray());
+  setWires(yWires.toArray());
+  setTimeout(() => { isApplyingRemoteRef.current = false; }, 100);
+};
 
     yComps.observe(applyRemote);
     yWires.observe(applyRemote);
@@ -1269,18 +1269,24 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId]);
 
-  useEffect(() => {
-    if (!ydocRef.current || mpStatus !== 'connected') return;
-    if (isApplyingRemoteRef.current) return;
-    const yComps = ydocRef.current.getArray<CircuitComponent>('components');
-    const yWires = ydocRef.current.getArray<Wire>('wires');
-    ydocRef.current.transact(() => {
+useEffect(() => {
+  if (!ydocRef.current || mpStatus !== 'connected') return;
+  if (isApplyingRemoteRef.current) return;
+  
+  // ⬇️ ДОБАВЬ ЭТУ СТРОКУ
+  const timeout = setTimeout(() => {
+    const yComps = ydocRef.current!.getArray<CircuitComponent>('components');
+    const yWires = ydocRef.current!.getArray<Wire>('wires');
+    ydocRef.current!.transact(() => {
       yComps.delete(0, yComps.length);
       yComps.insert(0, components);
       yWires.delete(0, yWires.length);
       yWires.insert(0, wires);
     });
-  }, [components, wires, mpStatus]);
+  }, 150); // ⬅️ 150 мс задержка
+  
+  return () => clearTimeout(timeout); // ⬅️ очистка
+}, [components, wires, mpStatus]);
 
   useEffect(() => {
     if (!yAwarenessRef.current) return;
@@ -1598,6 +1604,9 @@ export default function App() {
   };
 
   const handleComponentDrag = (comp: CircuitComponent, newPos: [number, number, number]) => {
+      const now = performance.now();
+  if (now - (dragStartPositions.current.get('__lastSend')?.[0] ?? 0) < 50) return;
+  dragStartPositions.current.set('__lastSend', [now, 0, 0]);
     if (dragStartPositions.current.size <= 1) {
       setComponents((prev) => prev.map((c) => (c.id === comp.id ? { ...c, position: newPos } : c)));
       return;
