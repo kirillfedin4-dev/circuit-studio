@@ -1210,14 +1210,28 @@ export default function App() {
       setMpStatus(e.status === 'connected' ? 'connected' : 'connecting');
     });
 
-    const yComps = ydoc.getArray<CircuitComponent>('components');
-    const yWires = ydoc.getArray<Wire>('wires');
+const yComps = ydoc.getMap<Y.Map<any>>('components');
+const yWires = ydoc.getMap<Y.Map<any>>('wires');
 
 const applyRemote = () => {
   isApplyingRemoteRef.current = true;
-  setComponents(yComps.toArray());
-  setWires(yWires.toArray());
-  setTimeout(() => { isApplyingRemoteRef.current = false; }, 100);
+  
+  // Преобразуем Y.Map → обычный массив CircuitComponent
+  const comps: CircuitComponent[] = [];
+  yComps.forEach((yComp) => {
+    const comp = yComp.toJSON() as CircuitComponent;
+    comps.push(comp);
+  });
+  
+  const wrs: Wire[] = [];
+  yWires.forEach((yWire) => {
+    const wire = yWire.toJSON() as Wire;
+    wrs.push(wire);
+  });
+  
+  setComponents(comps);
+  setWires(wrs);
+  setTimeout(() => { isApplyingRemoteRef.current = false; }, 50);
 };
 
     yComps.observe(applyRemote);
@@ -1232,8 +1246,12 @@ const applyRemote = () => {
       }
     });
 
-    const awareness = provider.awareness;
-    yAwarenessRef.current = awareness;
+const awareness = provider.awareness;
+yAwarenessRef.current = awareness;
+
+if (awareness.getLocalState() === null) {
+  awareness.setLocalState({});
+}
     const updateUsers = () => {
       const states = Array.from(awareness.getStates().entries()) as [number, any][];
       const others = states
@@ -1257,12 +1275,14 @@ const applyRemote = () => {
       clientId: myClientIdRef.current,
     });
 
-    return () => {
-      provider.destroy();
-      ydoc.destroy();
-      ydocRef.current = null;
-      yProviderRef.current = null;
-      yAwarenessRef.current = null;
+return () => {
+  provider.destroy();
+  // ⚠️ НЕ вызываем ydoc.destroy() и awareness.destroy()!
+  // Они переиспользуются React StrictMode
+  ydocRef.current = null;
+  yProviderRef.current = null;
+  yAwarenessRef.current = null;
+  // ...
       setMpStatus('off');
       setOnlineUsers([]);
     };
@@ -1273,19 +1293,60 @@ useEffect(() => {
   if (!ydocRef.current || mpStatus !== 'connected') return;
   if (isApplyingRemoteRef.current) return;
   
-  // ⬇️ ДОБАВЬ ЭТУ СТРОКУ
-  const timeout = setTimeout(() => {
-    const yComps = ydocRef.current!.getArray<CircuitComponent>('components');
-    const yWires = ydocRef.current!.getArray<Wire>('wires');
-    ydocRef.current!.transact(() => {
-      yComps.delete(0, yComps.length);
-      yComps.insert(0, components);
-      yWires.delete(0, yWires.length);
-      yWires.insert(0, wires);
-    });
-  }, 150); // ⬅️ 150 мс задержка
+  const yComps = ydocRef.current.getMap<Y.Map<any>>('components');
+  const yWires = ydocRef.current.getMap<Y.Map<any>>('wires');
   
-  return () => clearTimeout(timeout); // ⬅️ очистка
+  ydocRef.current.transact(() => {
+    // === Компоненты ===
+    const currentIds = new Set(components.map((c) => c.id));
+    const yIds = new Set(yComps.keys());
+    
+    // Удаляем те, которых больше нет
+    for (const id of yIds) {
+      if (!currentIds.has(id)) yComps.delete(id);
+    }
+    
+    // Обновляем или добавляем
+    for (const comp of components) {
+      const existing = yComps.get(comp.id);
+      if (!existing) {
+        // Новый компонент — создаём Y.Map
+        const yComp = new Y.Map();
+        Object.entries(comp).forEach(([k, v]) => yComp.set(k, v));
+        yComps.set(comp.id, yComp);
+      } else {
+        // Существующий — обновляем только изменившиеся поля
+        for (const [k, v] of Object.entries(comp)) {
+          if (JSON.stringify(existing.get(k)) !== JSON.stringify(v)) {
+            existing.set(k, v);
+          }
+        }
+      }
+    }
+    
+    // === Провода ===
+    const currentWireIds = new Set(wires.map((w) => w.id));
+    const yWireIds = new Set(yWires.keys());
+    
+    for (const id of yWireIds) {
+      if (!currentWireIds.has(id)) yWires.delete(id);
+    }
+    
+    for (const wire of wires) {
+      const existing = yWires.get(wire.id);
+      if (!existing) {
+        const yWire = new Y.Map();
+        Object.entries(wire).forEach(([k, v]) => yWire.set(k, v));
+        yWires.set(wire.id, yWire);
+      } else {
+        for (const [k, v] of Object.entries(wire)) {
+          if (JSON.stringify(existing.get(k)) !== JSON.stringify(v)) {
+            existing.set(k, v);
+          }
+        }
+      }
+    }
+  });
 }, [components, wires, mpStatus]);
 
   useEffect(() => {
@@ -1604,9 +1665,9 @@ useEffect(() => {
   };
 
   const handleComponentDrag = (comp: CircuitComponent, newPos: [number, number, number]) => {
-      const now = performance.now();
-  if (now - (dragStartPositions.current.get('__lastSend')?.[0] ?? 0) < 50) return;
-  dragStartPositions.current.set('__lastSend', [now, 0, 0]);
+  const now = performance.now();
+  if (now - (dragAnchorRef.current as any)?.[0] ?? 0 < 50) return;
+  dragAnchorRef.current = [now, 0, 0];
     if (dragStartPositions.current.size <= 1) {
       setComponents((prev) => prev.map((c) => (c.id === comp.id ? { ...c, position: newPos } : c)));
       return;
