@@ -1020,6 +1020,7 @@ export default function App() {
   const yProviderRef = useRef<WebsocketProvider | null>(null);
   const yAwarenessRef = useRef<any>(null);
   const isApplyingRemoteRef = useRef(false);
+  const isDraggingRef = useRef(false);
   const myClientIdRef = useRef(Math.random().toString(36).slice(2, 8));
 
   const T = THEMES[theme];
@@ -1292,6 +1293,7 @@ return () => {
 useEffect(() => {
   if (!ydocRef.current || mpStatus !== 'connected') return;
   if (isApplyingRemoteRef.current) return;
+  if (isDraggingRef.current) return;
   
   const yComps = ydocRef.current.getMap<Y.Map<any>>('components');
   const yWires = ydocRef.current.getMap<Y.Map<any>>('wires');
@@ -1651,6 +1653,7 @@ useEffect(() => {
   };
 
   const handleComponentDragStart = (comp: CircuitComponent) => {
+     isDraggingRef.current = true; 
     const map = new Map<string, [number, number, number]>();
     for (const id of selectedIds) {
       const c = components.find((x) => x.id === id);
@@ -2465,7 +2468,11 @@ useEffect(() => {
             onClick={(e) => handleComponentClick(comp.id, e)}
             onDrag={(pos) => handleComponentDrag(comp, pos)}
             onDragStart={() => handleComponentDragStart(comp)}
-            onDragEnd={() => { dragStartPositions.current.clear(); dragAnchorRef.current = null; }}
+            onDragEnd={() => { 
+  dragStartPositions.current.clear(); 
+  dragAnchorRef.current = null; 
+  isDraggingRef.current = false;  // ← ДОБАВЬ
+}}
             disableControls={disableControls}
             enableControls={enableControls}
             connectSource={connectSource}
