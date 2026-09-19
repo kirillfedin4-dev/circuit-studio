@@ -530,7 +530,6 @@ function DraggableComponent({
       onClick(e as any);
     }
     dragging.current = true;
-    // Пытаемся захватить указатель на canvas
     const canvas = (window as any).__r3fCanvas as HTMLCanvasElement | null;
     if (canvas && native.pointerId !== undefined) {
       try { canvas.setPointerCapture(native.pointerId); } catch {}
@@ -1020,12 +1019,53 @@ export default function App() {
   const ydocRef = useRef<Y.Doc | null>(null);
   const yProviderRef = useRef<WebsocketProvider | null>(null);
   const yAwarenessRef = useRef<any>(null);
-  const isApplyingRemoteRef = useRef(false);
-  const isDraggingRef = useRef(false);
+  const yCompsRef = useRef<Y.Map<Y.Map<any>> | null>(null);
+  const yWiresRef = useRef<Y.Map<Y.Map<any>> | null>(null);
   const myClientIdRef = useRef(Math.random().toString(36).slice(2, 8));
 
   const T = THEMES[theme];
   const analysis = useMemo(() => analyzeCircuit(components, wires), [components, wires]);
+
+  // ============ YJS WRITE HELPERS ============
+  const updateYComponent = useCallback((comp: CircuitComponent) => {
+    const yComps = yCompsRef.current;
+    if (!yComps || !ydocRef.current) return;
+    ydocRef.current.transact(() => {
+      const existing = yComps.get(comp.id);
+      if (!existing) {
+        const yComp = new Y.Map();
+        Object.entries(comp).forEach(([k, v]) => yComp.set(k, v));
+        yComps.set(comp.id, yComp);
+      } else {
+        Object.entries(comp).forEach(([k, v]) => {
+          if (JSON.stringify(existing.get(k)) !== JSON.stringify(v)) {
+            existing.set(k, v);
+          }
+        });
+      }
+    });
+  }, []);
+
+  const deleteYComponent = useCallback((id: string) => {
+    yCompsRef.current?.delete(id);
+  }, []);
+
+  const updateYWire = useCallback((wire: Wire) => {
+    const yWires = yWiresRef.current;
+    if (!yWires || !ydocRef.current) return;
+    ydocRef.current.transact(() => {
+      const existing = yWires.get(wire.id);
+      if (!existing) {
+        const yWire = new Y.Map();
+        Object.entries(wire).forEach(([k, v]) => yWire.set(k, v));
+        yWires.set(wire.id, yWire);
+      }
+    });
+  }, []);
+
+  const deleteYWire = useCallback((id: string) => {
+    yWiresRef.current?.delete(id);
+  }, []);
 
   useEffect(() => {
     const canvas = document.querySelector('canvas');
@@ -1199,6 +1239,7 @@ export default function App() {
     else setScreen('lessons');
   };
 
+  // ============ YJS ROOM ============
   useEffect(() => {
     if (!roomId) return;
     setMpStatus('connecting');
@@ -1212,59 +1253,67 @@ export default function App() {
       setMpStatus(e.status === 'connected' ? 'connected' : 'connecting');
     });
 
-const yComps = ydoc.getMap<Y.Map<any>>('components');
-const yWires = ydoc.getMap<Y.Map<any>>('wires');
+    const yComps = ydoc.getMap<Y.Map<any>>('components');
+    const yWires = ydoc.getMap<Y.Map<any>>('wires');
+    yCompsRef.current = yComps;
+    yWiresRef.current = yWires;
 
-const applyRemote = () => {
-  isApplyingRemoteRef.current = true;
-  
-  // Преобразуем Y.Map → обычный массив CircuitComponent
-  const comps: CircuitComponent[] = [];
-  yComps.forEach((yComp) => {
-    const comp = yComp.toJSON() as CircuitComponent;
-    comps.push(comp);
-  });
-  
-  const wrs: Wire[] = [];
-  yWires.forEach((yWire) => {
-    const wire = yWire.toJSON() as Wire;
-    wrs.push(wire);
-  });
-  
-  setComponents(comps);
-  setWires(wrs);
-  setTimeout(() => { isApplyingRemoteRef.current = false; }, 50);
-};
-
-    yComps.observe(applyRemote);
-    yWires.observe(applyRemote);
-
-provider.on('sync', (synced: boolean) => {
-  if (synced && yComps.size === 0 && yWires.size === 0) {
-    // Первый клиент — записываем начальное состояние
-    ydoc.transact(() => {
-      components.forEach((comp) => {
-        const yComp = new Y.Map();
-        Object.entries(comp).forEach(([k, v]) => yComp.set(k, v));
-        yComps.set(comp.id, yComp);
+    let rafId = 0;
+    const scheduleApplyRemote = () => {
+      if (rafId) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = 0;
+        const comps: CircuitComponent[] = [];
+        yComps.forEach((yComp) => {
+          try {
+            comps.push(yComp.toJSON() as CircuitComponent);
+          } catch (err) {
+            console.error('Failed to parse component:', err);
+          }
+        });
+        const wrs: Wire[] = [];
+        yWires.forEach((yWire) => {
+          try {
+            wrs.push(yWire.toJSON() as Wire);
+          } catch (err) {
+            console.error('Failed to parse wire:', err);
+          }
+        });
+        setComponents(comps);
+        setWires(wrs);
       });
-      wires.forEach((wire) => {
-        const yWire = new Y.Map();
-        Object.entries(wire).forEach(([k, v]) => yWire.set(k, v));
-        yWires.set(wire.id, yWire);
-      });
+    };
+
+    yComps.observe(scheduleApplyRemote);
+    yWires.observe(scheduleApplyRemote);
+
+    provider.on('sync', (synced: boolean) => {
+      if (synced && yComps.size === 0 && yWires.size === 0) {
+        // Первый клиент — записываем начальное состояние
+        ydoc.transact(() => {
+          components.forEach((comp) => {
+            const yComp = new Y.Map();
+            Object.entries(comp).forEach(([k, v]) => yComp.set(k, v));
+            yComps.set(comp.id, yComp);
+          });
+          wires.forEach((wire) => {
+            const yWire = new Y.Map();
+            Object.entries(wire).forEach(([k, v]) => yWire.set(k, v));
+            yWires.set(wire.id, yWire);
+          });
+        });
+      } else if (synced) {
+        scheduleApplyRemote();
+      }
     });
-  } else if (synced) {
-    applyRemote();
-  }
-});
 
-const awareness = provider.awareness;
-yAwarenessRef.current = awareness;
+    const awareness = provider.awareness;
+    yAwarenessRef.current = awareness;
 
-if (awareness.getLocalState() === null) {
-  awareness.setLocalState({});
-}
+    if (awareness.getLocalState() === null) {
+      awareness.setLocalState({});
+    }
+
     const updateUsers = () => {
       const states = Array.from(awareness.getStates().entries()) as [number, any][];
       const others = states
@@ -1288,80 +1337,19 @@ if (awareness.getLocalState() === null) {
       clientId: myClientIdRef.current,
     });
 
-return () => {
-  provider.destroy();
-  // ⚠️ НЕ вызываем ydoc.destroy() и awareness.destroy()!
-  // Они переиспользуются React StrictMode
-  ydocRef.current = null;
-  yProviderRef.current = null;
-  yAwarenessRef.current = null;
-  // ...
+    return () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      provider.destroy();
+      ydocRef.current = null;
+      yProviderRef.current = null;
+      yAwarenessRef.current = null;
+      yCompsRef.current = null;
+      yWiresRef.current = null;
       setMpStatus('off');
       setOnlineUsers([]);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId]);
-
-useEffect(() => {
-  if (!ydocRef.current || mpStatus !== 'connected') return;
-  if (isApplyingRemoteRef.current) return;
-  if (isDraggingRef.current) return;
-  
-  const yComps = ydocRef.current.getMap<Y.Map<any>>('components');
-  const yWires = ydocRef.current.getMap<Y.Map<any>>('wires');
-  
-  ydocRef.current.transact(() => {
-    // === Компоненты ===
-    const currentIds = new Set(components.map((c) => c.id));
-    const yIds = new Set(yComps.keys());
-    
-    // Удаляем те, которых больше нет
-    for (const id of yIds) {
-      if (!currentIds.has(id)) yComps.delete(id);
-    }
-    
-    // Обновляем или добавляем
-    for (const comp of components) {
-      const existing = yComps.get(comp.id);
-      if (!existing) {
-        // Новый компонент — создаём Y.Map
-        const yComp = new Y.Map();
-        Object.entries(comp).forEach(([k, v]) => yComp.set(k, v));
-        yComps.set(comp.id, yComp);
-      } else {
-        // Существующий — обновляем только изменившиеся поля
-        for (const [k, v] of Object.entries(comp)) {
-          if (JSON.stringify(existing.get(k)) !== JSON.stringify(v)) {
-            existing.set(k, v);
-          }
-        }
-      }
-    }
-    
-    // === Провода ===
-    const currentWireIds = new Set(wires.map((w) => w.id));
-    const yWireIds = new Set(yWires.keys());
-    
-    for (const id of yWireIds) {
-      if (!currentWireIds.has(id)) yWires.delete(id);
-    }
-    
-    for (const wire of wires) {
-      const existing = yWires.get(wire.id);
-      if (!existing) {
-        const yWire = new Y.Map();
-        Object.entries(wire).forEach(([k, v]) => yWire.set(k, v));
-        yWires.set(wire.id, yWire);
-      } else {
-        for (const [k, v] of Object.entries(wire)) {
-          if (JSON.stringify(existing.get(k)) !== JSON.stringify(v)) {
-            existing.set(k, v);
-          }
-        }
-      }
-    }
-  });
-}, [components, wires, mpStatus]);
 
   useEffect(() => {
     if (!yAwarenessRef.current) return;
@@ -1516,6 +1504,8 @@ useEffect(() => {
           toComp: idMap.get(w.toComp) || w.toComp,
           toPin: w.toPin,
         }));
+        newComps.forEach(updateYComponent);
+        newWires.forEach(updateYWire);
         setComponents((prev) => [...prev, ...newComps]);
         setWires((prev) => [...prev, ...newWires]);
         setSelectedIds(new Set(newComps.map((c) => c.id)));
@@ -1536,6 +1526,7 @@ useEffect(() => {
               newIds.push(newId);
             }
           }
+          newComps.forEach(updateYComponent);
           setComponents((prev) => [...prev, ...newComps]);
           setSelectedIds(new Set(newIds));
         }
@@ -1552,12 +1543,14 @@ useEffect(() => {
         if (selectedWireIds.size > 0 || selectedWireId) {
           const ids = new Set(selectedWireIds);
           if (selectedWireId) ids.add(selectedWireId);
+          ids.forEach(deleteYWire);
           setWires((prev) => prev.filter((w) => !ids.has(w.id)));
           setSelectedWireIds(new Set());
           setSelectedWireId(null);
           didSomething = true;
         }
         if (selectedIds.size > 0) {
+          selectedIds.forEach(deleteYComponent);
           setComponents((prev) => prev.filter((c) => !selectedIds.has(c.id)));
           setWires((prev) => prev.filter((w) => !selectedIds.has(w.fromComp) && !selectedIds.has(w.toComp)));
           setSelectedIds(new Set());
@@ -1571,7 +1564,9 @@ useEffect(() => {
             if (!selectedIds.has(c.id)) return c;
             const r = [...c.rotation] as [number, number, number];
             r[key] += delta;
-            return { ...c, rotation: r };
+            const next = { ...c, rotation: r };
+            updateYComponent(next);
+            return next;
           }));
         };
         if (['q','Q','й','Й'].includes(e.key)) upd(1, -15);
@@ -1592,7 +1587,7 @@ useEffect(() => {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selectedIds, selectedWireId, selectedWireIds, soundOn, undo, redo, clipboard, components, wires]);
+  }, [selectedIds, selectedWireId, selectedWireIds, soundOn, undo, redo, clipboard, components, wires, updateYComponent, updateYWire, deleteYComponent, deleteYWire]);
 
   const disableControls = useCallback(() => { if (controlsRef.current) controlsRef.current.enabled = false; }, []);
   const enableControls = useCallback(() => { if (controlsRef.current) controlsRef.current.enabled = true; }, []);
@@ -1609,6 +1604,7 @@ useEffect(() => {
     if (type === 'inductor') base.inductance = 10;
     if (type === 'transistor') { base.hFE = 100; base.transistorOpen = false; }
     if (type === 'potentiometer') { base.resistance = 1000; base.wiper = 0.5; }
+    updateYComponent(base);
     setComponents((prev) => [...prev, base]);
     setSelectedIds(new Set([id])); setSelectedWireId(null);
   };
@@ -1634,6 +1630,8 @@ useEffect(() => {
       toComp: idMap.get(w.toComp) || w.toComp,
       toPin: w.toPin,
     }));
+    newComps.forEach(updateYComponent);
+    newWires.forEach(updateYWire);
     setComponents((prev) => [...prev, ...newComps]);
     setWires((prev) => [...prev, ...newWires]);
     if (newComps[0]) setSelectedIds(new Set([newComps[0].id]));
@@ -1642,6 +1640,7 @@ useEffect(() => {
 
   const removeSelected = () => {
     if (selectedIds.size === 0) return;
+    selectedIds.forEach(deleteYComponent);
     setComponents((prev) => prev.filter((c) => !selectedIds.has(c.id)));
     setWires((prev) => prev.filter((w) => !selectedIds.has(w.fromComp) && !selectedIds.has(w.toComp)));
     setSelectedIds(new Set()); setConnectSource(null);
@@ -1659,13 +1658,13 @@ useEffect(() => {
         newIds.push(newId);
       }
     }
+    newComps.forEach(updateYComponent);
     setComponents((prev) => [...prev, ...newComps]);
     setSelectedIds(new Set(newIds));
     if (soundOn) playConnect();
   };
 
   const handleComponentDragStart = (comp: CircuitComponent) => {
-     isDraggingRef.current = true; 
     const map = new Map<string, [number, number, number]>();
     for (const id of selectedIds) {
       const c = components.find((x) => x.id === id);
@@ -1677,21 +1676,25 @@ useEffect(() => {
     }
     dragStartPositions.current = map;
     dragAnchorRef.current = null;
+    lastDragSendRef.current = 0;
   };
 
-const handleComponentDrag = (comp: CircuitComponent, newPos: [number, number, number]) => {
-  const now = performance.now();
-  if (now - lastDragSendRef.current < 16) return;  // ~60 fps
-  lastDragSendRef.current = now;
-  // ...
+  const handleComponentDrag = (comp: CircuitComponent, newPos: [number, number, number]) => {
+    const now = performance.now();
+    if (now - lastDragSendRef.current < 33) return;
+    lastDragSendRef.current = now;
 
     if (dragStartPositions.current.size <= 1) {
-      setComponents((prev) => prev.map((c) => (c.id === comp.id ? { ...c, position: newPos } : c)));
+      const updated = { ...comp, position: newPos };
+      setComponents((prev) => prev.map((c) => (c.id === comp.id ? updated : c)));
+      updateYComponent(updated);
       return;
     }
     const startPos = dragStartPositions.current.get(comp.id);
     if (!startPos) {
-      setComponents((prev) => prev.map((c) => (c.id === comp.id ? { ...c, position: newPos } : c)));
+      const updated = { ...comp, position: newPos };
+      setComponents((prev) => prev.map((c) => (c.id === comp.id ? updated : c)));
+      updateYComponent(updated);
       return;
     }
     const dx = newPos[0] - startPos[0];
@@ -1700,21 +1703,35 @@ const handleComponentDrag = (comp: CircuitComponent, newPos: [number, number, nu
     setComponents((prev) => prev.map((c) => {
       const sp = dragStartPositions.current.get(c.id);
       if (sp) {
-        return { ...c, position: [sp[0] + dx, 0, sp[2] + dz] };
+        const next = { ...c, position: [sp[0] + dx, 0, sp[2] + dz] as [number, number, number] };
+        updateYComponent(next);
+        return next;
       }
       if (c.id === comp.id) {
-        return { ...c, position: newPos };
+        const next = { ...c, position: newPos };
+        updateYComponent(next);
+        return next;
       }
       return c;
     }));
   };
 
   const updateValue = (id: string, key: 'voltage'|'resistance'|'rating'|'capacitance'|'inductance', value: number) => {
-    setComponents((prev) => prev.map((c) => (c.id === id ? { ...c, [key]: value } : c)));
+    setComponents((prev) => prev.map((c) => {
+      if (c.id !== id) return c;
+      const next = { ...c, [key]: value };
+      updateYComponent(next);
+      return next;
+    }));
   };
 
   const updateLampSound = (id: string, patch: { lampMuted?: boolean; lampVolume?: number }) => {
-    setComponents((prev) => prev.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+    setComponents((prev) => prev.map((c) => {
+      if (c.id !== id) return c;
+      const next = { ...c, ...patch };
+      updateYComponent(next);
+      return next;
+    }));
   };
 
   const rotateSelected = (axis: 0|1|2, delta: number) => {
@@ -1723,13 +1740,20 @@ const handleComponentDrag = (comp: CircuitComponent, newPos: [number, number, nu
       if (!selectedIds.has(c.id)) return c;
       const r = [...c.rotation] as [number, number, number];
       r[axis] += delta;
-      return { ...c, rotation: r };
+      const next = { ...c, rotation: r };
+      updateYComponent(next);
+      return next;
     }));
   };
 
   const resetRotation = () => {
     if (selectedIds.size === 0) return;
-    setComponents((prev) => prev.map((c) => selectedIds.has(c.id) ? { ...c, rotation: [0,0,0] } : c));
+    setComponents((prev) => prev.map((c) => {
+      if (!selectedIds.has(c.id)) return c;
+      const next = { ...c, rotation: [0,0,0] as [number, number, number] };
+      updateYComponent(next);
+      return next;
+    }));
   };
 
   const toggleSwitch = (id: string) => {
@@ -1737,8 +1761,11 @@ const handleComponentDrag = (comp: CircuitComponent, newPos: [number, number, nu
     setComponents((prev) =>
       prev.map((c) => {
         if (c.id !== id) return c;
-        if (c.type === 'transistor') return { ...c, transistorOpen: !c.transistorOpen };
-        return { ...c, closed: !c.closed };
+        const next = c.type === 'transistor'
+          ? { ...c, transistorOpen: !c.transistorOpen }
+          : { ...c, closed: !c.closed };
+        updateYComponent(next);
+        return next;
       })
     );
   };
@@ -1777,6 +1804,25 @@ const handleComponentDrag = (comp: CircuitComponent, newPos: [number, number, nu
       try {
         const data = JSON.parse(ev.target?.result as string);
         if (data.components && data.wires) {
+          // Очистить Yjs и записать новое
+          const yComps = yCompsRef.current;
+          const yWires = yWiresRef.current;
+          if (yComps && yWires && ydocRef.current) {
+            ydocRef.current.transact(() => {
+              Array.from(yComps.keys()).forEach((k) => yComps.delete(k));
+              Array.from(yWires.keys()).forEach((k) => yWires.delete(k));
+              data.components.forEach((comp: CircuitComponent) => {
+                const yComp = new Y.Map();
+                Object.entries(comp).forEach(([k, v]) => yComp.set(k, v));
+                yComps.set(comp.id, yComp);
+              });
+              data.wires.forEach((wire: Wire) => {
+                const yWire = new Y.Map();
+                Object.entries(wire).forEach(([k, v]) => yWire.set(k, v));
+                yWires.set(wire.id, yWire);
+              });
+            });
+          }
           setComponents(data.components); setWires(data.wires);
           setSelectedIds(new Set()); setSelectedWireId(null); setConnectSource(null);
         }
@@ -1869,7 +1915,15 @@ const handleComponentDrag = (comp: CircuitComponent, newPos: [number, number, nu
              (w.toComp === connectSource.comp && w.toPin === connectSource.pin && w.fromComp === ref.comp && w.fromPin === ref.pin)
     );
     if (!exists) {
-      setWires((prev) => [...prev, { id: crypto.randomUUID(), fromComp: connectSource.comp, fromPin: connectSource.pin, toComp: ref.comp, toPin: ref.pin }]);
+      const newWire: Wire = {
+        id: crypto.randomUUID(),
+        fromComp: connectSource.comp,
+        fromPin: connectSource.pin,
+        toComp: ref.comp,
+        toPin: ref.pin,
+      };
+      updateYWire(newWire);
+      setWires((prev) => [...prev, newWire]);
       if (soundOn) playConnect();
     }
     setConnectSource(null);
@@ -1949,22 +2003,7 @@ const handleComponentDrag = (comp: CircuitComponent, newPos: [number, number, nu
           cameraMode={cameraMode}
           onToggleOrbit={() => setCameraMode((m) => m === 'orbit' ? 'free' : 'orbit')}
           timeSeconds={lessonTime}
-          onAddComponent={(type) => {
-            const id = crypto.randomUUID();
-            const x = (Math.random() - 0.5) * 6;
-            const z = (Math.random() - 0.5) * 6;
-            const base: CircuitComponent = { id, type, position: [x, 0, z], rotation: [0, 0, 0] };
-            if (type === 'battery') base.voltage = 9;
-            if (type === 'resistor') base.resistance = 220;
-            if (type === 'lamp') { base.rating = 1; base.lampVolume = 0.5; base.lampMuted = false; }
-            if (type === 'capacitor') base.capacitance = 100;
-            if (type === 'inductor') base.inductance = 10;
-            if (type === 'switch') base.closed = false;
-            if (type === 'potentiometer') { base.resistance = 1000; base.wiper = 0.5; }
-            setComponents((prev) => [...prev, base]);
-            setSelectedIds(new Set([id]));
-            setSelectedWireId(null);
-          }}
+          onAddComponent={addComponent}
           onClear={() => {
             setComponents([]);
             setWires([]);
@@ -2233,7 +2272,12 @@ const handleComponentDrag = (comp: CircuitComponent, newPos: [number, number, nu
                 theme={T}
                 onChange={(v) => {
                   setComponents((prev) =>
-                    prev.map((c) => (c.id === selectedComp.id ? { ...c, hFE: v } : c))
+                    prev.map((c) => {
+                      if (c.id !== selectedComp.id) return c;
+                      const next = { ...c, hFE: v };
+                      updateYComponent(next);
+                      return next;
+                    })
                   );
                 }}
               />
@@ -2272,7 +2316,12 @@ const handleComponentDrag = (comp: CircuitComponent, newPos: [number, number, nu
                   onChange={(e) => {
                     const v = Number(e.target.value);
                     setComponents((prev) =>
-                      prev.map((c) => (c.id === selectedComp.id ? { ...c, wiper: v } : c))
+                      prev.map((c) => {
+                        if (c.id !== selectedComp.id) return c;
+                        const next = { ...c, wiper: v };
+                        updateYComponent(next);
+                        return next;
+                      })
                     );
                   }}
                   style={{ width: '100%', accentColor: '#f97316', height: 4 }}
@@ -2284,7 +2333,7 @@ const handleComponentDrag = (comp: CircuitComponent, newPos: [number, number, nu
           {selectedComp.type === 'lamp' && analysis.burntLamps.has(selectedComp.id) && (
             <div style={{ marginBottom: 12, padding: 12, background: T.dangerSoft, border: `1px solid ${T.danger}`, borderRadius: 8 }}>
               <div style={{ fontSize: 13, color: T.danger, fontWeight: 700, marginBottom: 8 }}>💥 Лампа перегорела</div>
-              <button onClick={() => { setComponents((prev) => prev.map((c) => c.id === selectedComp.id ? { ...c, rating: (c.rating ?? 1) * 2 } : c)); if (soundOn) playConnect(); }}
+              <button onClick={() => { setComponents((prev) => prev.map((c) => { if (c.id !== selectedComp.id) return c; const next = { ...c, rating: (c.rating ?? 1) * 2 }; updateYComponent(next); return next; })); if (soundOn) playConnect(); }}
                 style={{ width: '100%', padding: '8px 10px', background: T.success, color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'inherit' }}>
                 ♻️ Заменить лампу
               </button>
@@ -2348,6 +2397,7 @@ const handleComponentDrag = (comp: CircuitComponent, newPos: [number, number, nu
                 onClick={() => {
                   const ids = new Set(selectedWireIds);
                   if (selectedWireId) ids.add(selectedWireId);
+                  ids.forEach(deleteYWire);
                   setWires((prev) => prev.filter((w) => !ids.has(w.id)));
                   setSelectedWireIds(new Set());
                   setSelectedWireId(null);
@@ -2421,13 +2471,13 @@ const handleComponentDrag = (comp: CircuitComponent, newPos: [number, number, nu
         shadows
         camera={{ position: [9, 8, 10], fov: 50 }}
         gl={{ antialias: true, preserveDrawingBuffer: true }}
-        onCreated={({ camera, size, raycaster, scene, pointer }) => {
+        onCreated={({ camera, size, raycaster, scene, pointer, gl }) => {
           (window as any).__r3fCamera = camera;
           (window as any).__r3fSize = size;
           (window as any).__r3fRaycaster = raycaster;
           (window as any).__r3fScene = scene;
           (window as any).__r3fPointer = pointer;
-            (window as any).__r3fCanvas = (scene as any).__r3f_canvas ?? (window as any).__r3f_canvas ?? document.querySelector('canvas[data-engine]');
+          (window as any).__r3fCanvas = gl.domElement;
         }}
       >
         <color attach="background" args={[T.sceneBg]} />
@@ -2482,12 +2532,11 @@ const handleComponentDrag = (comp: CircuitComponent, newPos: [number, number, nu
             onClick={(e) => handleComponentClick(comp.id, e)}
             onDrag={(pos) => handleComponentDrag(comp, pos)}
             onDragStart={() => handleComponentDragStart(comp)}
-onDragEnd={() => { 
-  dragStartPositions.current.clear(); 
-  dragAnchorRef.current = null; 
-  isDraggingRef.current = false;
-  console.log('🔴 DRAG END, isDragging =', isDraggingRef.current);
-}}
+            onDragEnd={() => {
+              dragStartPositions.current.clear();
+              dragAnchorRef.current = null;
+              lastDragSendRef.current = 0;
+            }}
             disableControls={disableControls}
             enableControls={enableControls}
             connectSource={connectSource}
@@ -2500,7 +2549,12 @@ onDragEnd={() => {
             onToggleSwitch={() => toggleSwitch(comp.id)}
             onChangeWiper={(v) => {
               setComponents((prev) =>
-                prev.map((c) => (c.id === comp.id ? { ...c, wiper: v } : c))
+                prev.map((c) => {
+                  if (c.id !== comp.id) return c;
+                  const next = { ...c, wiper: v };
+                  updateYComponent(next);
+                  return next;
+                })
               );
             }}
             ammeterReadings={analysis.ammeterReadings}
