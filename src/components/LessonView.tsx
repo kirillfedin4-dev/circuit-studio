@@ -36,7 +36,6 @@ interface LessonViewProps {
   onAddComponent: (type: ComponentType) => void;
   onClear: () => void;
   onCelebrate: () => void;
-  // Новые
   selectedId: string | null;
   onRemoveSelected: () => void;
   onDuplicateSelected: () => void;
@@ -87,30 +86,37 @@ export default function LessonView({
 }: LessonViewProps) {
   const lesson = LESSONS.find((l) => l.id === lessonId);
   const [result, setResult] = useState<{ passed: boolean; message: string } | null>(null);
-  const [expanded, setExpanded] = useState(true);
   const [showBanner, setShowBanner] = useState(false);
   const [seconds, setSeconds] = useState(0);
-  
 
-   useEffect(() => {
+  // ============ MOBILE ============
+  const [isMobile, setIsMobile] = useState(false);
+  const [expanded, setExpanded] = useState(true);
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+
+  useEffect(() => {
     setResult(null);
     setShowBanner(false);
-    setExpanded(true);
+    setExpanded(!isMobile); // на мобильном задание свёрнуто
     setSeconds(0);
-  }, [lessonId]);
+  }, [lessonId, isMobile]);
 
-  // Тикаем секунды, пока не показана плашка «МОЛОДЕЦ»
   useEffect(() => {
     if (showBanner) return;
     const id = setInterval(() => setSeconds((s) => s + 1), 1000);
     return () => clearInterval(id);
   }, [lessonId, showBanner]);
 
-
   if (!lesson) return null;
 
   const currentIndex = LESSONS.findIndex((l) => l.id === lessonId);
-    const selectedComp = components.find((c) => c.id === selectedId);
+  const selectedComp = components.find((c) => c.id === selectedId);
   const rotation: [number, number, number] | null = selectedComp?.rotation ?? null;
   const isLast = currentIndex === LESSONS.length - 1;
   const nextLesson = !isLast ? LESSONS[currentIndex + 1] : null;
@@ -127,7 +133,6 @@ export default function LessonView({
 
   return (
     <>
-      {/* Плашка успеха сверху */}
       {showBanner && (
         <SuccessBanner
           T={T}
@@ -139,10 +144,9 @@ export default function LessonView({
         />
       )}
 
-      {/* Таймер */}
-          <Timer key={lessonId} T={T} resetKey={lessonId} paused={showBanner} externalSeconds={seconds} />
+      <Timer key={lessonId} T={T} resetKey={lessonId} paused={showBanner} externalSeconds={seconds} />
 
-      {/* Палитра компонентов сверху */}
+      {/* ============ ПАЛИТРА КОМПОНЕНТОВ ============ */}
       <AnimatedWrapper
         type="slide-down"
         delay={100}
@@ -152,7 +156,8 @@ export default function LessonView({
           left: '50%',
           transform: 'translateX(-50%)',
           zIndex: 10,
-          maxWidth: 'calc(100vw - 200px)',
+          width: isMobile ? 'calc(100% - 24px)' : 'auto',
+          maxWidth: isMobile ? 'calc(100% - 24px)' : 'calc(100vw - 200px)',
         }}
       >
         <div
@@ -160,14 +165,17 @@ export default function LessonView({
             background: T.panelBg,
             border: `1px solid ${T.panelBorder}`,
             borderRadius: 14,
-            padding: '8px 10px',
+            padding: isMobile ? '6px 8px' : '8px 10px',
             boxShadow: T.panelShadow,
             backdropFilter: 'blur(16px)',
             display: 'flex',
             alignItems: 'center',
             gap: 6,
-            flexWrap: 'wrap',
-            justifyContent: 'center',
+            flexWrap: isMobile ? 'nowrap' : 'wrap',
+            justifyContent: isMobile ? 'flex-start' : 'center',
+            overflowX: isMobile ? 'auto' : 'visible',
+            overflowY: 'hidden',
+            WebkitOverflowScrolling: 'touch',
           }}
         >
           {LESSON_COMPONENTS.map((c, i) => (
@@ -180,7 +188,7 @@ export default function LessonView({
                 flexDirection: 'column',
                 alignItems: 'center',
                 gap: 2,
-                padding: '6px 10px',
+                padding: isMobile ? '5px 8px' : '6px 10px',
                 background: T.buttonBg,
                 color: T.text,
                 border: `1px solid ${T.buttonBorder}`,
@@ -189,27 +197,18 @@ export default function LessonView({
                 fontSize: 10,
                 fontFamily: 'inherit',
                 fontWeight: 600,
-                minWidth: 56,
+                minWidth: isMobile ? 44 : 56,
+                flexShrink: 0,
                 transition: 'all 0.15s',
                 animation: `popIn 0.3s ease ${i * 30}ms backwards`,
               }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = T.buttonHoverBg;
-                e.currentTarget.style.borderColor = T.primary;
-                e.currentTarget.style.transform = 'translateY(-2px)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = T.buttonBg;
-                e.currentTarget.style.borderColor = T.buttonBorder;
-                e.currentTarget.style.transform = 'translateY(0)';
-              }}
             >
-              <span style={{ fontSize: 20, lineHeight: 1 }}>{c.icon}</span>
-              <span style={{ fontSize: 10, color: T.textMuted }}>{c.label}</span>
+              <span style={{ fontSize: isMobile ? 18 : 20, lineHeight: 1 }}>{c.icon}</span>
+              {!isMobile && <span style={{ fontSize: 10, color: T.textMuted }}>{c.label}</span>}
             </button>
           ))}
 
-          <div style={{ width: 1, height: 40, background: T.panelBorder, margin: '0 4px' }} />
+          <div style={{ width: 1, height: 40, background: T.panelBorder, margin: '0 4px', flexShrink: 0 }} />
 
           <button
             onClick={() => {
@@ -224,7 +223,7 @@ export default function LessonView({
               flexDirection: 'column',
               alignItems: 'center',
               gap: 2,
-              padding: '6px 10px',
+              padding: isMobile ? '5px 8px' : '6px 10px',
               background: T.dangerSoft,
               color: T.danger,
               border: `1px solid ${T.danger}`,
@@ -233,26 +232,27 @@ export default function LessonView({
               fontSize: 10,
               fontFamily: 'inherit',
               fontWeight: 600,
-              minWidth: 56,
+              minWidth: isMobile ? 44 : 56,
+              flexShrink: 0,
             }}
           >
-            <span style={{ fontSize: 20, lineHeight: 1 }}>🧹</span>
-            <span style={{ fontSize: 10 }}>Очистить</span>
+            <span style={{ fontSize: isMobile ? 18 : 20, lineHeight: 1 }}>🧹</span>
+            {!isMobile && <span style={{ fontSize: 10 }}>Очистить</span>}
           </button>
         </div>
       </AnimatedWrapper>
 
-      {/* Задание урока снизу */}
+      {/* ============ ЗАДАНИЕ УРОКА ============ */}
       <AnimatedWrapper
         type="slide-up"
         delay={250}
         style={{
           position: 'absolute',
-          bottom: 16,
+          bottom: isMobile ? 8 : 16,
           left: '50%',
           transform: 'translateX(-50%)',
           zIndex: 10,
-          width: 'calc(100% - 32px)',
+          width: isMobile ? 'calc(100% - 16px)' : 'calc(100% - 32px)',
           maxWidth: 640,
         }}
       >
@@ -271,8 +271,8 @@ export default function LessonView({
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: 10,
-              padding: '10px 14px',
+              gap: isMobile ? 6 : 10,
+              padding: isMobile ? '8px 10px' : '10px 14px',
               cursor: 'pointer',
               userSelect: 'none',
             }}
@@ -280,33 +280,36 @@ export default function LessonView({
             <button
               onClick={(e) => { e.stopPropagation(); onBack(); }}
               style={{
-                padding: '6px 10px',
+                padding: isMobile ? '5px 8px' : '6px 10px',
                 background: T.buttonBg,
                 color: T.text,
                 border: `1px solid ${T.buttonBorder}`,
                 borderRadius: 6,
                 cursor: 'pointer',
-                fontSize: 12,
+                fontSize: isMobile ? 11 : 12,
                 fontFamily: 'inherit',
                 fontWeight: 600,
+                flexShrink: 0,
               }}
             >
               ← Карта
             </button>
-            <div style={{ fontSize: 11, color: T.textDim, fontWeight: 600 }}>
-              УРОК {currentIndex + 1}/{LESSONS.length}
-            </div>
-            <div style={{ flex: 1, fontSize: 14, fontWeight: 700, color: T.text }}>
+            {!isMobile && (
+              <div style={{ fontSize: 11, color: T.textDim, fontWeight: 600 }}>
+                УРОК {currentIndex + 1}/{LESSONS.length}
+              </div>
+            )}
+            <div style={{ flex: 1, fontSize: isMobile ? 12 : 14, fontWeight: 700, color: T.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {lesson.icon} {lesson.title}
             </div>
-            <span style={{ color: T.textDim, fontSize: 14, transform: expanded ? 'rotate(180deg)' : 'rotate(0)', transition: 'transform 0.2s' }}>
+            <span style={{ color: T.textDim, fontSize: 14, transform: expanded ? 'rotate(180deg)' : 'rotate(0)', transition: 'transform 0.2s', flexShrink: 0 }}>
               ▼
             </span>
           </div>
 
           {expanded && (
-            <div style={{ padding: '0 14px 14px', borderTop: `1px solid ${T.panelBorder}` }}>
-              <div style={{ fontSize: 12, color: T.textMuted, margin: '10px 0', lineHeight: 1.5 }}>
+            <div style={{ padding: isMobile ? '0 10px 10px' : '0 14px 14px', borderTop: `1px solid ${T.panelBorder}` }}>
+              <div style={{ fontSize: isMobile ? 11 : 12, color: T.textMuted, margin: '10px 0', lineHeight: 1.5 }}>
                 {lesson.description}
               </div>
 
@@ -330,10 +333,10 @@ export default function LessonView({
               </div>
 
               <details style={{ marginBottom: 10 }}>
-                <summary style={{ cursor: 'pointer', fontSize: 12, color: T.primary, fontWeight: 600, padding: '4px 0' }}>
+                <summary style={{ cursor: 'pointer', fontSize: isMobile ? 11 : 12, color: T.primary, fontWeight: 600, padding: '4px 0' }}>
                   💡 Подсказка
                 </summary>
-                <div style={{ background: T.primarySoft, color: T.primary, padding: 8, borderRadius: 6, fontSize: 12, marginTop: 6, lineHeight: 1.5 }}>
+                <div style={{ background: T.primarySoft, color: T.primary, padding: 8, borderRadius: 6, fontSize: isMobile ? 11 : 12, marginTop: 6, lineHeight: 1.5 }}>
                   {lesson.hint}
                 </div>
               </details>
@@ -344,7 +347,7 @@ export default function LessonView({
                     padding: 8,
                     borderRadius: 8,
                     marginBottom: 8,
-                    fontSize: 12,
+                    fontSize: isMobile ? 11 : 12,
                     background: result.passed ? T.successSoft : T.dangerSoft,
                     color: result.passed ? T.success : T.danger,
                     fontWeight: 600,
@@ -364,13 +367,13 @@ export default function LessonView({
                   onClick={check}
                   style={{
                     flex: 1,
-                    padding: '10px 14px',
+                    padding: isMobile ? '10px 12px' : '10px 14px',
                     background: T.primary,
                     color: '#fff',
                     border: 'none',
                     borderRadius: 8,
                     cursor: 'pointer',
-                    fontSize: 13,
+                    fontSize: isMobile ? 13 : 13,
                     fontWeight: 700,
                     fontFamily: 'inherit',
                   }}
@@ -382,13 +385,13 @@ export default function LessonView({
                     onClick={isLast ? onBack : onNextLesson}
                     style={{
                       flex: 1,
-                      padding: '10px 14px',
+                      padding: isMobile ? '10px 12px' : '10px 14px',
                       background: T.success,
                       color: '#fff',
                       border: 'none',
                       borderRadius: 8,
                       cursor: 'pointer',
-                      fontSize: 13,
+                      fontSize: isMobile ? 13 : 13,
                       fontWeight: 700,
                       fontFamily: 'inherit',
                       animation: 'popIn 0.3s ease',
@@ -402,29 +405,32 @@ export default function LessonView({
           )}
         </div>
       </AnimatedWrapper>
-            {/* Правая панель инструментов */}
-      <LessonToolbar
-        T={T}
-        theme={theme}
-        onChangeTheme={onChangeTheme}
-        soundOn={soundOn}
-        onToggleSound={onToggleSound}
-        hasSelection={!!selectedId}
-        onRemove={onRemoveSelected}
-        onDuplicate={onDuplicateSelected}
-        onClearWires={onClearWires}
-        onUndo={onUndo}
-        onRedo={onRedo}
-        canUndo={canUndo}
-        canRedo={canRedo}
-        rotation={rotation}
-        onRotate={onRotate}
-        onResetRotation={onResetRotation}
-        onCameraPreset={onCameraPreset}
-        cameraMode={cameraMode}
-        onToggleOrbit={onToggleOrbit}
-      />
 
+      {/* ============ ПРАВАЯ ПАНЕЛЬ ИНСТРУМЕНТОВ ============ */}
+      {/* На мобильном скрываем — там своя палитра снизу из App.tsx */}
+      {!isMobile && (
+        <LessonToolbar
+          T={T}
+          theme={theme}
+          onChangeTheme={onChangeTheme}
+          soundOn={soundOn}
+          onToggleSound={onToggleSound}
+          hasSelection={!!selectedId}
+          onRemove={onRemoveSelected}
+          onDuplicate={onDuplicateSelected}
+          onClearWires={onClearWires}
+          onUndo={onUndo}
+          onRedo={onRedo}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          rotation={rotation}
+          onRotate={onRotate}
+          onResetRotation={onResetRotation}
+          onCameraPreset={onCameraPreset}
+          cameraMode={cameraMode}
+          onToggleOrbit={onToggleOrbit}
+        />
+      )}
 
       <style>{`
         @keyframes popIn {
