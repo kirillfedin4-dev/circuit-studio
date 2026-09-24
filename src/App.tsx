@@ -983,6 +983,18 @@ export default function App() {
 
   const [marquee, setMarquee] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null);
 
+  // ============ MOBILE ============
+  const [isMobile, setIsMobile] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [mobilePropsOpen, setMobilePropsOpen] = useState(false);
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+
   const [roomId, setRoomId] = useState(() => {
     if (typeof window === 'undefined') return 'default';
     return new URLSearchParams(window.location.search).get('room') || '';
@@ -1289,7 +1301,6 @@ export default function App() {
 
     provider.on('sync', (synced: boolean) => {
       if (synced && yComps.size === 0 && yWires.size === 0) {
-        // Первый клиент — записываем начальное состояние
         ydoc.transact(() => {
           components.forEach((comp) => {
             const yComp = new Y.Map();
@@ -1804,7 +1815,6 @@ export default function App() {
       try {
         const data = JSON.parse(ev.target?.result as string);
         if (data.components && data.wires) {
-          // Очистить Yjs и записать новое
           const yComps = yCompsRef.current;
           const yWires = yWiresRef.current;
           if (yComps && yWires && ydocRef.current) {
@@ -1940,6 +1950,134 @@ export default function App() {
     return [comp.position[0] + rotated[0], comp.position[1] + rotated[1], comp.position[2] + rotated[2]];
   };
 
+  // ============ PROPERTIES PANEL (вынесено для переиспользования) ============
+  const renderPropertiesPanel = () => {
+    if (!selectedComp) return null;
+    return (
+      <>
+        <div style={{ marginBottom: 16, paddingBottom: 12, borderBottom: `1px solid ${T.panelBorder}` }}>
+          <div style={{ fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8, color: T.text }}>
+            <span>{COMPONENT_LABELS[selectedComp.type].icon}</span>
+            <span>{COMPONENT_LABELS[selectedComp.type].name}</span>
+          </div>
+        </div>
+
+        {selectedComp.type === 'battery' && <SliderField label="Напряжение (В)" value={selectedComp.voltage ?? 9} min={1} max={24} step={1} color={T.primary} theme={T} onChange={(v) => updateValue(selectedComp.id, 'voltage', v)} />}
+        {selectedComp.type === 'resistor' && <SliderField label="Сопротивление (Ω)" value={selectedComp.resistance ?? 220} min={10} max={10000} step={10} color={T.accent1} theme={T} onChange={(v) => updateValue(selectedComp.id, 'resistance', v)} />}
+        {selectedComp.type === 'lamp' && <SliderField label="Мощность (Вт)" value={selectedComp.rating ?? 1} min={0.1} max={10} step={0.1} color={T.success} theme={T} onChange={(v) => updateValue(selectedComp.id, 'rating', v)} />}
+        {selectedComp.type === 'capacitor' && <SliderField label="Ёмкость (µF)" value={selectedComp.capacitance ?? 100} min={1} max={1000} step={1} color={T.accent1} theme={T} onChange={(v) => updateValue(selectedComp.id, 'capacitance', v)} />}
+        {selectedComp.type === 'transistor' && (
+          <>
+            <SliderField
+              label="Коэффициент усиления hFE"
+              value={selectedComp.hFE ?? 100}
+              min={10}
+              max={500}
+              step={10}
+              color="#8b5cf6"
+              theme={T}
+              onChange={(v) => {
+                setComponents((prev) =>
+                  prev.map((c) => {
+                    if (c.id !== selectedComp.id) return c;
+                    const next = { ...c, hFE: v };
+                    updateYComponent(next);
+                    return next;
+                  })
+                );
+              }}
+            />
+            <div style={{ fontSize: 12, color: T.textMuted, marginBottom: 8, display: 'flex', justifyContent: 'space-between' }}>
+              <span>Состояние</span>
+              <b style={{ color: selectedComp.transistorOpen ? T.success : T.danger }}>
+                {selectedComp.transistorOpen ? 'Открыт ✅' : 'Закрыт ⛔'}
+              </b>
+            </div>
+          </>
+        )}
+
+        {selectedComp.type === 'potentiometer' && (
+          <>
+            <SliderField
+              label="Полное сопротивление (Ω)"
+              value={selectedComp.resistance ?? 1000}
+              min={100}
+              max={10000}
+              step={100}
+              color="#f97316"
+              theme={T}
+              onChange={(v) => updateValue(selectedComp.id, 'resistance', v)}
+            />
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 12, color: T.textMuted, marginBottom: 6, display: 'flex', justifyContent: 'space-between' }}>
+                <span>Ползунок</span>
+                <b style={{ color: '#f97316' }}>{Math.round((selectedComp.wiper ?? 0.5) * 100)}%</b>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={selectedComp.wiper ?? 0.5}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  setComponents((prev) =>
+                    prev.map((c) => {
+                      if (c.id !== selectedComp.id) return c;
+                      const next = { ...c, wiper: v };
+                      updateYComponent(next);
+                      return next;
+                    })
+                  );
+                }}
+                style={{ width: '100%', accentColor: '#f97316', height: 4 }}
+              />
+            </div>
+          </>
+        )}
+
+        {selectedComp.type === 'lamp' && analysis.burntLamps.has(selectedComp.id) && (
+          <div style={{ marginBottom: 12, padding: 12, background: T.dangerSoft, border: `1px solid ${T.danger}`, borderRadius: 8 }}>
+            <div style={{ fontSize: 13, color: T.danger, fontWeight: 700, marginBottom: 8 }}>💥 Лампа перегорела</div>
+            <button onClick={() => { setComponents((prev) => prev.map((c) => { if (c.id !== selectedComp.id) return c; const next = { ...c, rating: (c.rating ?? 1) * 2 }; updateYComponent(next); return next; })); if (soundOn) playConnect(); }}
+              style={{ width: '100%', padding: '8px 10px', background: T.success, color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'inherit' }}>
+              ♻️ Заменить лампу
+            </button>
+          </div>
+        )}
+
+        {selectedComp.type === 'switch' && (
+          <div style={{ fontSize: 13, color: T.textMuted, marginBottom: 12 }}>
+            Состояние: <b style={{ color: selectedComp.closed ? T.success : T.danger }}>{selectedComp.closed ? 'Замкнут ✅' : 'Разомкнут ⛔'}</b>
+          </div>
+        )}
+
+        <hr style={{ border: 'none', borderTop: `1px solid ${T.panelBorder}`, margin: '14px 0' }} />
+        <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1.5, color: T.textDim, marginBottom: 8 }}>Поворот</div>
+        <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 4, display: 'flex', justifyContent: 'space-between' }}>
+          <span>X (W/S)</span><b>{selectedComp.rotation[0]}°</b>
+        </div>
+        <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 4, display: 'flex', justifyContent: 'space-between' }}>
+          <span>Y (Q/E)</span><b>{selectedComp.rotation[1]}°</b>
+        </div>
+        <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 8, display: 'flex', justifyContent: 'space-between' }}>
+          <span>Z (A/D)</span><b>{selectedComp.rotation[2]}°</b>
+        </div>
+        <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+          <button style={smallBtn(T)} onClick={() => rotateSelected(0, -15)}>X↺</button>
+          <button style={smallBtn(T)} onClick={() => rotateSelected(0, 15)}>X↻</button>
+          <button style={smallBtn(T)} onClick={() => rotateSelected(1, -15)}>Y↺</button>
+          <button style={smallBtn(T)} onClick={() => rotateSelected(1, 15)}>Y↻</button>
+        </div>
+        <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+          <button style={smallBtn(T)} onClick={() => rotateSelected(2, -15)}>Z↺</button>
+          <button style={smallBtn(T)} onClick={() => rotateSelected(2, 15)}>Z↻</button>
+          <button style={smallBtn(T)} onClick={resetRotation}>⟲ 0°</button>
+        </div>
+      </>
+    );
+  };
+
   if (screen === 'lessons') {
     return (
       <LessonsMap
@@ -1951,7 +2089,7 @@ export default function App() {
   }
 
   return (
-    <div style={{ position: 'fixed', inset: 0, fontFamily: 'Inter, system-ui, sans-serif', background: T.sceneBg }}>
+    <div style={{ position: 'fixed', inset: 0, fontFamily: 'Inter, system-ui, sans-serif', background: T.sceneBg, overflow: 'hidden' }}>
       {soundOn && components
         .filter((c) => c.type === 'lamp' && analysis.litLamps.has(c.id) && !analysis.burntLamps.has(c.id))
         .map((c) => (
@@ -2015,7 +2153,8 @@ export default function App() {
         />
       )}
 
-      {screen !== 'lesson-active' && (
+      {/* ============ DESKTOP SIDEBAR ============ */}
+      {screen !== 'lesson-active' && !isMobile && (
         <div data-ui-panel>
           <Sidebar
             T={T}
@@ -2243,135 +2382,300 @@ export default function App() {
         </div>
       )}
 
-      {selectedComp && screen !== 'lesson-active' && (
+      {/* ============ MOBILE BURGER + SIDEBAR ============ */}
+      {screen !== 'lesson-active' && isMobile && (
+        <>
+          <button
+            data-ui-panel
+            onClick={() => setMobileSidebarOpen(true)}
+            style={{
+              position: 'absolute',
+              top: 12, left: 12, zIndex: 20,
+              width: 48, height: 48,
+              borderRadius: 12,
+              background: T.panelBg,
+              border: `1px solid ${T.panelBorder}`,
+              color: T.text,
+              fontSize: 22,
+              cursor: 'pointer',
+              boxShadow: T.panelShadow,
+              backdropFilter: 'blur(16px)',
+            }}
+          >
+            ☰
+          </button>
+
+          {mobileSidebarOpen && (
+            <>
+              <div
+                data-ui-panel
+                onClick={() => setMobileSidebarOpen(false)}
+                style={{
+                  position: 'fixed', inset: 0, zIndex: 30,
+                  background: 'rgba(0,0,0,0.5)',
+                }}
+              />
+              <div
+                data-ui-panel
+                style={{
+                  position: 'fixed',
+                  top: 0, left: 0, bottom: 0,
+                  zIndex: 31,
+                  width: '85%', maxWidth: 320,
+                  overflowY: 'auto',
+                  background: T.panelBg,
+                }}
+              >
+                <Sidebar
+                  T={T}
+                  theme={theme}
+                  user={user}
+                  currentScreen={screen}
+                  screens={{
+                    sandbox: () => { setScreen('sandbox'); setMobileSidebarOpen(false); },
+                    lessons: () => { setScreen('lessons'); setMobileSidebarOpen(false); },
+                  }}
+                  onAuth={() => setShowAuth(true)}
+                  onSignOut={signOut}
+                  onChangeTheme={(k) => setTheme(k)}
+                  sections={[
+                    {
+                      id: 'components',
+                      icon: '🧩',
+                      title: 'Компоненты',
+                      badge: `${components.length}`,
+                      content: (
+                        <>
+                          {(Object.keys(COMPONENT_LABELS) as ComponentType[]).map((type) => {
+                            const info = COMPONENT_LABELS[type];
+                            return (
+                              <button key={type}
+                                style={{
+                                  display: 'flex', alignItems: 'center', width: '100%',
+                                  marginBottom: 6, padding: '8px 12px',
+                                  background: T.buttonBg, color: T.text,
+                                  border: `1px solid ${T.buttonBorder}`, borderRadius: 10,
+                                  cursor: 'pointer', textAlign: 'left', fontSize: 13,
+                                  fontFamily: 'inherit',
+                                }}
+                                onClick={() => { addComponent(type); setMobileSidebarOpen(false); }}
+                              >
+                                <span style={{ fontSize: 16, marginRight: 8 }}>{info.icon}</span>
+                                <span>{info.name}</span>
+                              </button>
+                            );
+                          })}
+                        </>
+                      ),
+                    },
+                    {
+                      id: 'blocks',
+                      icon: '📚',
+                      title: 'Библиотека блоков',
+                      content: (
+                        <>
+                          {PRESET_BLOCKS.map((block) => (
+                            <button key={block.id}
+                              style={{
+                                display: 'flex', alignItems: 'center', width: '100%',
+                                marginBottom: 6, padding: '8px 10px',
+                                background: T.primarySoft, color: T.primary,
+                                border: `1px solid ${T.primary}`, borderRadius: 8,
+                                cursor: 'pointer', textAlign: 'left', fontSize: 12,
+                                fontFamily: 'inherit', fontWeight: 600,
+                              }}
+                              onClick={() => { addBlock(block); setMobileSidebarOpen(false); }}
+                            >
+                              <span style={{ fontSize: 16, marginRight: 8 }}>{block.icon}</span>
+                              <span>{block.name}</span>
+                            </button>
+                          ))}
+                        </>
+                      ),
+                    },
+                    {
+                      id: 'multiplayer',
+                      icon: '👥',
+                      title: 'Мультиплеер',
+                      badge: mpStatus === 'connected' ? '🟢' : undefined,
+                      content: (
+                        <>
+                          <input
+                            type="text"
+                            placeholder="ID комнаты (Enter)"
+                            value={roomId}
+                            onChange={(e) => setRoomId(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                const url = new URL(window.location.href);
+                                if (roomId) url.searchParams.set('room', roomId);
+                                else url.searchParams.delete('room');
+                                window.location.href = url.toString();
+                              }
+                            }}
+                            style={{
+                              width: '100%', padding: '8px 10px', fontSize: 14, fontFamily: 'inherit',
+                              background: T.buttonBg, color: T.text, border: `1px solid ${T.buttonBorder}`,
+                              borderRadius: 8, marginBottom: 6, boxSizing: 'border-box',
+                            }}
+                          />
+                          <div style={{ fontSize: 12, color: T.textMuted }}>
+                            {mpStatus === 'off' && '⚪ Офлайн'}
+                            {mpStatus === 'connecting' && '🟡 Подключение...'}
+                            {mpStatus === 'connected' && '🟢 Онлайн'} · {onlineUsers.length + (mpStatus === 'connected' ? 1 : 0)} чел.
+                          </div>
+                        </>
+                      ),
+                    },
+                    {
+                      id: 'actions',
+                      icon: '🛠️',
+                      title: 'Действия',
+                      content: (
+                        <>
+                          <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+                            <button style={{ ...smallBtn(T), opacity: historyIndexRef.current > 0 ? 1 : 0.4 }} disabled={historyIndexRef.current <= 0} onClick={undo}>↶ Undo</button>
+                            <button style={{ ...smallBtn(T), opacity: historyIndexRef.current < historyRef.current.length - 1 ? 1 : 0.4 }} disabled={historyIndexRef.current >= historyRef.current.length - 1} onClick={redo}>↷ Redo</button>
+                          </div>
+                          <button style={{ ...actionBtn(T), background: soundOn ? T.primarySoft : T.buttonBg, color: soundOn ? T.primary : T.textDim, textAlign: 'center' }}
+                            onClick={() => setSoundOn((v) => !v)}>
+                            {soundOn ? '🔊 Звук: вкл' : '🔇 Звук: выкл'}
+                          </button>
+                          <button style={{ ...actionBtn(T), background: T.dangerSoft, color: T.danger, border: `1px solid ${T.danger}` }} disabled={selectedIds.size === 0} onClick={removeSelected}>
+                            🗑 Удалить выбранные ({selectedIds.size})
+                          </button>
+                          <button style={{ ...actionBtn(T), background: T.buttonBg, color: T.textMuted }} onClick={() => { setWires([]); setConnectSource(null); setSelectedWireId(null); }}>
+                            ✂ Очистить провода
+                          </button>
+                        </>
+                      ),
+                    },
+                  ]}
+                />
+              </div>
+            </>
+          )}
+        </>
+      )}
+
+      {/* ============ DESKTOP PROPERTIES PANEL ============ */}
+      {selectedComp && screen !== 'lesson-active' && !isMobile && (
         <div data-ui-panel style={{
           position: 'absolute', top: 16, right: 16, zIndex: 10,
           background: T.panelBg, color: T.text, padding: 18, borderRadius: 16,
           width: 260, backdropFilter: 'blur(16px)', border: `1px solid ${T.panelBorder}`,
           boxShadow: T.panelShadow,
         }}>
-          <div style={{ marginBottom: 16, paddingBottom: 12, borderBottom: `1px solid ${T.panelBorder}` }}>
-            <div style={{ fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8, color: T.text }}>
-              <span>{COMPONENT_LABELS[selectedComp.type].icon}</span><span>{COMPONENT_LABELS[selectedComp.type].name}</span>
-            </div>
-          </div>
-
-          {selectedComp.type === 'battery' && <SliderField label="Напряжение (В)" value={selectedComp.voltage ?? 9} min={1} max={24} step={1} color={T.primary} theme={T} onChange={(v) => updateValue(selectedComp.id, 'voltage', v)} />}
-          {selectedComp.type === 'resistor' && <SliderField label="Сопротивление (Ω)" value={selectedComp.resistance ?? 220} min={10} max={10000} step={10} color={T.accent1} theme={T} onChange={(v) => updateValue(selectedComp.id, 'resistance', v)} />}
-          {selectedComp.type === 'lamp' && <SliderField label="Мощность (Вт)" value={selectedComp.rating ?? 1} min={0.1} max={10} step={0.1} color={T.success} theme={T} onChange={(v) => updateValue(selectedComp.id, 'rating', v)} />}
-          {selectedComp.type === 'capacitor' && <SliderField label="Ёмкость (µF)" value={selectedComp.capacitance ?? 100} min={1} max={1000} step={1} color={T.accent1} theme={T} onChange={(v) => updateValue(selectedComp.id, 'capacitance', v)} />}
-          {selectedComp.type === 'transistor' && (
-            <>
-              <SliderField
-                label="Коэффициент усиления hFE"
-                value={selectedComp.hFE ?? 100}
-                min={10}
-                max={500}
-                step={10}
-                color="#8b5cf6"
-                theme={T}
-                onChange={(v) => {
-                  setComponents((prev) =>
-                    prev.map((c) => {
-                      if (c.id !== selectedComp.id) return c;
-                      const next = { ...c, hFE: v };
-                      updateYComponent(next);
-                      return next;
-                    })
-                  );
-                }}
-              />
-              <div style={{ fontSize: 12, color: T.textMuted, marginBottom: 8, display: 'flex', justifyContent: 'space-between' }}>
-                <span>Состояние</span>
-                <b style={{ color: selectedComp.transistorOpen ? T.success : T.danger }}>
-                  {selectedComp.transistorOpen ? 'Открыт ✅' : 'Закрыт ⛔'}
-                </b>
-              </div>
-            </>
-          )}
-
-          {selectedComp.type === 'potentiometer' && (
-            <>
-              <SliderField
-                label="Полное сопротивление (Ω)"
-                value={selectedComp.resistance ?? 1000}
-                min={100}
-                max={10000}
-                step={100}
-                color="#f97316"
-                theme={T}
-                onChange={(v) => updateValue(selectedComp.id, 'resistance', v)}
-              />
-              <div style={{ marginBottom: 14 }}>
-                <div style={{ fontSize: 12, color: T.textMuted, marginBottom: 6, display: 'flex', justifyContent: 'space-between' }}>
-                  <span>Ползунок</span>
-                  <b style={{ color: '#f97316' }}>{Math.round((selectedComp.wiper ?? 0.5) * 100)}%</b>
-                </div>
-                <input
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  value={selectedComp.wiper ?? 0.5}
-                  onChange={(e) => {
-                    const v = Number(e.target.value);
-                    setComponents((prev) =>
-                      prev.map((c) => {
-                        if (c.id !== selectedComp.id) return c;
-                        const next = { ...c, wiper: v };
-                        updateYComponent(next);
-                        return next;
-                      })
-                    );
-                  }}
-                  style={{ width: '100%', accentColor: '#f97316', height: 4 }}
-                />
-              </div>
-            </>
-          )}
-
-          {selectedComp.type === 'lamp' && analysis.burntLamps.has(selectedComp.id) && (
-            <div style={{ marginBottom: 12, padding: 12, background: T.dangerSoft, border: `1px solid ${T.danger}`, borderRadius: 8 }}>
-              <div style={{ fontSize: 13, color: T.danger, fontWeight: 700, marginBottom: 8 }}>💥 Лампа перегорела</div>
-              <button onClick={() => { setComponents((prev) => prev.map((c) => { if (c.id !== selectedComp.id) return c; const next = { ...c, rating: (c.rating ?? 1) * 2 }; updateYComponent(next); return next; })); if (soundOn) playConnect(); }}
-                style={{ width: '100%', padding: '8px 10px', background: T.success, color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'inherit' }}>
-                ♻️ Заменить лампу
-              </button>
-            </div>
-          )}
-
-          {selectedComp.type === 'switch' && (
-            <div style={{ fontSize: 13, color: T.textMuted, marginBottom: 12 }}>
-              Состояние: <b style={{ color: selectedComp.closed ? T.success : T.danger }}>{selectedComp.closed ? 'Замкнут ✅' : 'Разомкнут ⛔'}</b>
-            </div>
-          )}
-
-          <hr style={{ border: 'none', borderTop: `1px solid ${T.panelBorder}`, margin: '14px 0' }} />
-          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1.5, color: T.textDim, marginBottom: 8 }}>Поворот</div>
-          <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 4, display: 'flex', justifyContent: 'space-between' }}>
-            <span>X (W/S)</span><b>{selectedComp.rotation[0]}°</b>
-          </div>
-          <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 4, display: 'flex', justifyContent: 'space-between' }}>
-            <span>Y (Q/E)</span><b>{selectedComp.rotation[1]}°</b>
-          </div>
-          <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 8, display: 'flex', justifyContent: 'space-between' }}>
-            <span>Z (A/D)</span><b>{selectedComp.rotation[2]}°</b>
-          </div>
-          <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
-            <button style={smallBtn(T)} onClick={() => rotateSelected(0, -15)}>X↺</button>
-            <button style={smallBtn(T)} onClick={() => rotateSelected(0, 15)}>X↻</button>
-            <button style={smallBtn(T)} onClick={() => rotateSelected(1, -15)}>Y↺</button>
-            <button style={smallBtn(T)} onClick={() => rotateSelected(1, 15)}>Y↻</button>
-          </div>
-          <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
-            <button style={smallBtn(T)} onClick={() => rotateSelected(2, -15)}>Z↺</button>
-            <button style={smallBtn(T)} onClick={() => rotateSelected(2, 15)}>Z↻</button>
-            <button style={smallBtn(T)} onClick={resetRotation}>⟲ 0°</button>
-          </div>
+          {renderPropertiesPanel()}
         </div>
       )}
 
-      {selectedIds.size > 1 && screen !== 'lesson-active' && (
+      {/* ============ MOBILE PROPERTIES BUTTON + PANEL ============ */}
+      {selectedComp && screen !== 'lesson-active' && isMobile && (
+        <>
+          <button
+            data-ui-panel
+            onClick={() => setMobilePropsOpen(true)}
+            style={{
+              position: 'absolute',
+              top: 12, right: 12, zIndex: 20,
+              width: 48, height: 48,
+              borderRadius: 12,
+              background: T.panelBg,
+              border: `1px solid ${T.panelBorder}`,
+              color: T.text,
+              fontSize: 22,
+              cursor: 'pointer',
+              boxShadow: T.panelShadow,
+            }}
+          >
+            ⚙️
+          </button>
+
+          {mobilePropsOpen && (
+            <>
+              <div
+                data-ui-panel
+                onClick={() => setMobilePropsOpen(false)}
+                style={{
+                  position: 'fixed', inset: 0, zIndex: 30,
+                  background: 'rgba(0,0,0,0.5)',
+                }}
+              />
+              <div
+                data-ui-panel
+                style={{
+                  position: 'fixed',
+                  left: 0, right: 0, bottom: 0,
+                  zIndex: 31,
+                  maxHeight: '70vh',
+                  overflowY: 'auto',
+                  background: T.panelBg,
+                  borderTop: `1px solid ${T.panelBorder}`,
+                  borderTopLeftRadius: 20,
+                  borderTopRightRadius: 20,
+                  padding: 18,
+                  backdropFilter: 'blur(16px)',
+                  boxShadow: T.panelShadow,
+                }}
+              >
+                {renderPropertiesPanel()}
+              </div>
+            </>
+          )}
+        </>
+      )}
+
+      {/* ============ MOBILE BOTTOM PALETTE ============ */}
+      {isMobile && screen !== 'lesson-active' && (
+        <div
+          data-ui-panel
+          style={{
+            position: 'absolute',
+            bottom: 12, left: 12, right: 12,
+            zIndex: 15,
+            background: T.panelBg,
+            border: `1px solid ${T.panelBorder}`,
+            borderRadius: 16,
+            padding: 8,
+            backdropFilter: 'blur(16px)',
+            boxShadow: T.panelShadow,
+            display: 'flex',
+            gap: 6,
+            overflowX: 'auto',
+            overflowY: 'hidden',
+          }}
+        >
+          {(Object.keys(COMPONENT_LABELS) as ComponentType[]).map((type) => {
+            const info = COMPONENT_LABELS[type];
+            return (
+              <button
+                key={type}
+                onClick={() => addComponent(type)}
+                style={{
+                  flexShrink: 0,
+                  width: 52, height: 52,
+                  borderRadius: 12,
+                  background: T.buttonBg,
+                  border: `1px solid ${T.buttonBorder}`,
+                  color: T.text,
+                  fontSize: 20,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+                title={info.name}
+              >
+                {info.icon}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ============ DESKTOP MULTI-SELECT INDICATOR ============ */}
+      {selectedIds.size > 1 && screen !== 'lesson-active' && !isMobile && (
         <div data-ui-panel style={{
           position: 'absolute', top: 16, right: 16, zIndex: 10,
           background: T.primarySoft, color: T.primary, padding: '10px 16px',
@@ -2381,7 +2685,8 @@ export default function App() {
         </div>
       )}
 
-      {screen !== 'lesson-active' && (
+      {/* ============ DESKTOP STATUS INDICATOR ============ */}
+      {screen !== 'lesson-active' && !isMobile && (
         <div data-ui-panel style={{
           position: 'absolute', bottom: 16, left: 16, zIndex: 10,
           background: analysis.errors.length > 0 ? T.dangerSoft : T.successSoft,
@@ -2412,7 +2717,31 @@ export default function App() {
         </div>
       )}
 
-      {analysis.closed && screen !== 'lesson-active' && (
+      {/* ============ MOBILE STATUS INDICATOR ============ */}
+      {screen !== 'lesson-active' && isMobile && (
+        <div
+          data-ui-panel
+          style={{
+            position: 'absolute',
+            bottom: 76,
+            left: 12, right: 12,
+            zIndex: 14,
+            background: analysis.errors.length > 0 ? T.dangerSoft : T.successSoft,
+            color: analysis.errors.length > 0 ? T.danger : T.success,
+            padding: '8px 12px',
+            borderRadius: 10,
+            fontSize: 12,
+            border: `1px solid ${analysis.errors.length > 0 ? T.danger : T.success}`,
+            fontWeight: 600,
+            textAlign: 'center',
+          }}
+        >
+          {analysis.errors.length === 0 ? '✅ Цепь замкнута' : analysis.errors[0]}
+        </div>
+      )}
+
+      {/* ============ DESKTOP MEASUREMENTS ============ */}
+      {analysis.closed && screen !== 'lesson-active' && !isMobile && (
         <div data-ui-panel style={{
           position: 'absolute', bottom: 16, right: 16, zIndex: 10,
           background: T.panelBg, color: T.text, padding: 18, borderRadius: 14, width: 260,
@@ -2431,7 +2760,7 @@ export default function App() {
         </div>
       )}
 
-      {screen !== 'lesson-active' && (
+      {screen !== 'lesson-active' && !isMobile && (
         <Oscilloscope
           T={T}
           voltage={analysis.batteryVoltage}
@@ -2469,7 +2798,7 @@ export default function App() {
 
       <Canvas
         shadows
-        camera={{ position: [9, 8, 10], fov: 50 }}
+        camera={{ position: [9, 8, 10], fov: isMobile ? 70 : 50 }}
         gl={{ antialias: true, preserveDrawingBuffer: true }}
         onCreated={({ camera, size, raycaster, scene, pointer, gl }) => {
           (window as any).__r3fCamera = camera;
@@ -2614,7 +2943,22 @@ export default function App() {
               }}
             />
           ))}
-        <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.1} minDistance={4} maxDistance={45} maxPolarAngle={Math.PI / 2.1} />
+        <OrbitControls
+          ref={controlsRef}
+          makeDefault
+          enableDamping
+          dampingFactor={0.1}
+          minDistance={4}
+          maxDistance={45}
+          maxPolarAngle={Math.PI / 2.1}
+          enablePan={true}
+          enableZoom={true}
+          enableRotate={true}
+          touches={{
+            ONE: THREE.TOUCH.ROTATE,
+            TWO: THREE.TOUCH.DOLLY_PAN,
+          }}
+        />
       </Canvas>
 
       {marquee && (
@@ -2637,6 +2981,15 @@ export default function App() {
         @keyframes flashOut {
           from { opacity: 1; }
           to { opacity: 0; }
+        }
+        @media (max-width: 768px) {
+          body {
+            overscroll-behavior: none;
+            touch-action: manipulation;
+          }
+          canvas {
+            touch-action: none;
+          }
         }
       `}</style>
     </div>
