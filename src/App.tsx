@@ -172,7 +172,7 @@ function LampHum({ active, volume, muted }: { active: boolean; volume: number; m
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = 'sawtooth';
-      osc.frequency.value = 60;
+      osc.frequency.value = 40;
       gain.gain.value = 0;
       osc.connect(gain).connect(ctx.destination);
       osc.start();
@@ -181,7 +181,7 @@ function LampHum({ active, volume, muted }: { active: boolean; volume: number; m
     }
 
     if (gainRef.current) {
-      const target = shouldPlay ? Math.min(0.03, volume * 0.03) : 0;
+      const target = shouldPlay ? Math.min(0.005, volume * 0.005) : 0;   // тише в 6 раз
       gainRef.current.gain.linearRampToValueAtTime(target, ctx.currentTime + 0.15);
     }
 
@@ -714,7 +714,7 @@ function Wire3D({ from, to, energized, shorted, current, selected, onSelect }: {
             onPointerOver={(e) => { e.stopPropagation(); setHovered(true); document.body.style.cursor = 'pointer'; }}
             onPointerOut={() => { setHovered(false); document.body.style.cursor = 'default'; }}
           >
-            <cylinderGeometry args={[0.22, 0.22, s.len * 1.05, 6]} />
+            <cylinderGeometry args={[0.5, 0.5, s.len * 1.05, 6]} />
             <meshBasicMaterial transparent opacity={0} depthWrite={false} />
           </mesh>
         );
@@ -1962,6 +1962,28 @@ export default function App() {
           </div>
         </div>
 
+      <button
+        onClick={() => {
+          removeSelected();
+          setMobilePropsOpen(false);
+        }}
+        style={{
+          width: '100%',
+          marginBottom: 14,
+          padding: '10px 12px',
+          background: T.dangerSoft,
+          color: T.danger,
+          border: `1px solid ${T.danger}`,
+          borderRadius: 8,
+          cursor: 'pointer',
+          fontSize: 13,
+          fontWeight: 600,
+          fontFamily: 'inherit',
+        }}
+      >
+        🗑 Удалить компонент
+      </button>
+
         {selectedComp.type === 'battery' && <SliderField label="Напряжение (В)" value={selectedComp.voltage ?? 9} min={1} max={24} step={1} color={T.primary} theme={T} onChange={(v) => updateValue(selectedComp.id, 'voltage', v)} />}
         {selectedComp.type === 'resistor' && <SliderField label="Сопротивление (Ω)" value={selectedComp.resistance ?? 220} min={10} max={10000} step={10} color={T.accent1} theme={T} onChange={(v) => updateValue(selectedComp.id, 'resistance', v)} />}
         {selectedComp.type === 'lamp' && <SliderField label="Мощность (Вт)" value={selectedComp.rating ?? 1} min={0.1} max={10} step={0.1} color={T.success} theme={T} onChange={(v) => updateValue(selectedComp.id, 'rating', v)} />}
@@ -2718,27 +2740,64 @@ export default function App() {
       )}
 
       {/* ============ MOBILE STATUS INDICATOR ============ */}
-      {screen !== 'lesson-active' && isMobile && (
-        <div
-          data-ui-panel
-          style={{
-            position: 'absolute',
-            bottom: 76,
-            left: 12, right: 12,
-            zIndex: 14,
-            background: analysis.errors.length > 0 ? T.dangerSoft : T.successSoft,
-            color: analysis.errors.length > 0 ? T.danger : T.success,
-            padding: '8px 12px',
-            borderRadius: 10,
-            fontSize: 12,
-            border: `1px solid ${analysis.errors.length > 0 ? T.danger : T.success}`,
-            fontWeight: 600,
-            textAlign: 'center',
-          }}
-        >
-          {analysis.errors.length === 0 ? '✅ Цепь замкнута' : analysis.errors[0]}
-        </div>
-      )}
+{screen !== 'lesson-active' && isMobile && (
+  <div data-ui-panel style={{
+    position: 'absolute',
+    bottom: 76,
+    left: 12, right: 12,
+    zIndex: 14,
+    background: (selectedWireId || selectedWireIds.size > 0)
+      ? T.primarySoft
+      : (analysis.errors.length > 0 ? T.dangerSoft : T.successSoft),
+    color: (selectedWireId || selectedWireIds.size > 0)
+      ? T.primary
+      : (analysis.errors.length > 0 ? T.danger : T.success),
+    padding: '8px 12px',
+    borderRadius: 10,
+    fontSize: 12,
+    border: `1px solid ${(selectedWireId || selectedWireIds.size > 0)
+      ? T.primary
+      : (analysis.errors.length > 0 ? T.danger : T.success)}`,
+    fontWeight: 600,
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
+  }}>
+    <span>
+      {(selectedWireId || selectedWireIds.size > 0)
+        ? `🔌 Проводов: ${selectedWireIds.size + (selectedWireId ? 1 : 0)}`
+        : (analysis.errors.length === 0 ? '✅ Цепь замкнута' : analysis.errors[0])}
+    </span>
+    {(selectedWireId || selectedWireIds.size > 0) && (
+      <button
+        onClick={() => {
+          const ids = new Set(selectedWireIds);
+          if (selectedWireId) ids.add(selectedWireId);
+          ids.forEach(deleteYWire);
+          setWires((prev) => prev.filter((w) => !ids.has(w.id)));
+          setSelectedWireIds(new Set());
+          setSelectedWireId(null);
+          if (soundOn) playClick();
+        }}
+        style={{
+          background: T.danger,
+          color: '#fff',
+          border: 'none',
+          borderRadius: 6,
+          padding: '4px 10px',
+          cursor: 'pointer',
+          fontSize: 12,
+          fontWeight: 700,
+          fontFamily: 'inherit',
+          flexShrink: 0,
+        }}
+      >
+        🗑 Удалить
+      </button>
+    )}
+  </div>
+)}
 
       {/* ============ DESKTOP MEASUREMENTS ============ */}
       {analysis.closed && screen !== 'lesson-active' && !isMobile && (
