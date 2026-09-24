@@ -216,6 +216,8 @@ function BatteryModel({ selected, voltage }: { selected: boolean; voltage: numbe
       <mesh castShadow position={[-0.85, 0.3, 0]}><cylinderGeometry args={[0.18, 0.18, 0.35, 20]} /><meshStandardMaterial color="#2563eb" metalness={0.9} roughness={0.2} /></mesh>
       <mesh position={[-0.85, 0.5, 0]}><cylinderGeometry args={[0.13, 0.13, 0.15, 16]} /><meshStandardMaterial color="#38bdf8" metalness={0.9} /></mesh>
       <Html position={[0, 1.2, 0]} center distanceFactor={10} zIndexRange={[5, 0]}>
+        <div style={labelStyle}>🔋 {voltage}V</div>
+      </Html>
     </group>
   );
 }
@@ -230,7 +232,9 @@ function ResistorModel({ selected, resistance }: { selected: boolean; resistance
       ))}
       <mesh castShadow position={[-0.9, 0.3, 0]} rotation={[0, 0, Math.PI / 2]}><cylinderGeometry args={[0.05, 0.05, 0.6, 12]} /><meshStandardMaterial color="#c0c0c0" metalness={1} roughness={0.15} /></mesh>
       <mesh castShadow position={[0.9, 0.3, 0]} rotation={[0, 0, Math.PI / 2]}><cylinderGeometry args={[0.05, 0.05, 0.6, 12]} /><meshStandardMaterial color="#c0c0c0" metalness={1} roughness={0.15} /></mesh>
-      <Html position={[0, 1.1, 0]} center distanceFactor={10} zIndexRange={[5, 0]}></Html>
+      <Html position={[0, 1.1, 0]} center distanceFactor={10} zIndexRange={[5, 0]}>
+        <div style={labelStyle}>⚡ {resistance >= 1000 ? `${(resistance / 1000).toFixed(1)}kΩ` : `${resistance}Ω`}</div>
+      </Html>
     </group>
   );
 }
@@ -319,7 +323,7 @@ function LedModel({ selected, lit, burnt }: { selected: boolean; lit: boolean; b
       <mesh position={[-0.2, 0.1, 0]}><cylinderGeometry args={[0.04, 0.04, 0.5, 10]} /><meshStandardMaterial color="#c0c0c0" metalness={1} /></mesh>
       <mesh position={[0.2, 0.05, 0]}><cylinderGeometry args={[0.04, 0.04, 0.4, 10]} /><meshStandardMaterial color="#c0c0c0" metalness={1} /></mesh>
       {lit && !burnt && <pointLight position={[0, 0.5, 0]} intensity={1.5} distance={5} color="#10b981" />}
-      <Html position={[0, 1.1, 0]} center distanceFactor={10} zIndexRange={[5, 0]}>div style={labelStyle}>{burnt ? '💥 LED' : '🟢 LED'}</div></Html>
+     <Html position={[0, 1.1, 0]} center distanceFactor={10} zIndexRange={[5, 0]}><div style={labelStyle}>{burnt ? '💥 LED' : '🟢 LED'}</div></Html>
     </group>
   );
 }
@@ -338,7 +342,7 @@ function SwitchModel({ selected, closed, onToggle }: { selected: boolean; closed
       >
         <mesh castShadow position={[0.6, 0, 0]}><boxGeometry args={[1.3, 0.08, 0.15]} /><meshStandardMaterial color={hovered ? '#f59e0b' : closed ? '#10b981' : '#64748b'} metalness={0.7} emissive={hovered ? '#f59e0b' : closed ? '#10b981' : '#000'} emissiveIntensity={hovered || closed ? 0.7 : 0} /></mesh>
       </group>
-     <Html position={[0, 1, 0]} center distanceFactor={10} zIndexRange={[5, 0]}>🔀 {closed ? 'Замкнут' : 'Разомкнут'}</div></Html>
+     <Html position={[0, 1, 0]} center distanceFactor={10} zIndexRange={[5, 0]}><div style={labelStyle}>🔀 {closed ? 'Замкнут' : 'Разомкнут'}</div></Html>
     </group>
   );
 }
@@ -384,7 +388,7 @@ function VoltmeterModel({ selected, voltage, energized }: { selected: boolean; v
       {Array.from({ length: 7 }).map((_, i) => { const a = -Math.PI / 2 + (i / 6) * Math.PI; return (<mesh key={i} position={[Math.cos(a) * 0.35, 0.5 + Math.sin(a) * 0.35, 0.22]} rotation={[0, 0, a - Math.PI / 2]}><boxGeometry args={[0.02, 0.06, 0.01]} /><meshBasicMaterial color="#475569" /></mesh>); })}
       <group ref={needleRef} position={[0, 0.5, 0.23]}><mesh position={[0, 0.18, 0]}><boxGeometry args={[0.02, 0.36, 0.01]} /><meshBasicMaterial color="#0284c7" /></mesh></group>
       <mesh position={[0, 0.5, 0.23]}><circleGeometry args={[0.04, 16]} /><meshBasicMaterial color="#1e293b" /></mesh>
-      <Html position={[0, 0.5, 0.25]} center distanceFactor={10} zIndexRange={[5, 0]}>><div style={{ fontSize: 9, color: '#1e293b', fontWeight: 700, marginTop: 20 }}>V</div></Html>
+      <Html position={[0, 0.5, 0.25]} center distanceFactor={10} zIndexRange={[5, 0]}><div style={{ fontSize: 9, color: '#1e293b', fontWeight: 700, marginTop: 20 }}>V</div></Html>
       <Html position={[0, 1.4, 0]} center distanceFactor={10} zIndexRange={[5, 0]}><div style={labelStyle}>📏 {voltage.toFixed(1)} В</div></Html>
       <mesh position={[0, 0.05, 0]}><boxGeometry args={[1.25, 0.08, 0.45]} /><meshStandardMaterial color={energized ? '#0ea5e9' : '#64748b'} emissive={energized ? '#0ea5e9' : '#000'} emissiveIntensity={energized ? 0.7 : 0} /></mesh>
     </group>
