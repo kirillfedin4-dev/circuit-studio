@@ -3054,6 +3054,17 @@ export default function App() {
             touch-action: none;
           }
         }
+          /* Все UI-панели — поверх плашек 3D */
+[data-ui-panel] {
+  position: relative;
+  z-index: 100 !important;
+}
+
+/* Контейнеры Html от drei — ниже панелей */
+.r3f-html-wrapper,
+[data-r3f-html] {
+  z-index: 5 !important;
+}
       `}</style>
     </div>
   );
